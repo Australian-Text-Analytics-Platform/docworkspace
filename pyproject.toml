@@ -1,0 +1,17 @@
+[project]
+name = "docworkspace"
+version = "0.1.0"
+description = "A workspace library for managing DocDataFrames and DataFrames with parent-child relationships and lazy evaluation"
+readme = "README.md"
+requires-python = ">=3.9"
+dependencies = [
+    "pandas>=2.0.0",
+    "polars>=0.20.0",
+    "docframe",
+    "typing-extensions",
+    "ipykernel>=6.29.5",
+]
+
+[tool.pyright]
+typeCheckingMode = "off"
+ignore = ["*"]
