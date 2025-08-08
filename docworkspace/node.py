@@ -116,11 +116,14 @@ class Node:
         self.id = str(uuid.uuid4())
         self.name = name or f"node_{self.id[:8]}"
 
-        # Validate data type
-        assert isinstance(data, SupportedDataTypes), TypeError(
-            f"Unsupported data type: {type(data).__name__}. "
-            f"Node only supports {SupportedDataTypes}."
-        )
+        # Validate data type without relying on Union in isinstance (not supported)
+        if not isinstance(
+            data, (pl.DataFrame, pl.LazyFrame, DocDataFrame, DocLazyFrame)
+        ):
+            raise TypeError(
+                f"Unsupported data type: {type(data).__name__}. "
+                "Node only supports pl.DataFrame, pl.LazyFrame, DocDataFrame, DocLazyFrame."
+            )
 
         self.data = data
         self.parents = parents or []
@@ -555,14 +558,24 @@ class Node:
         ):
             info_dict["shape"] = self.data.shape
         elif isinstance(self.data, (pl.LazyFrame, DocLazyFrame)):
-            height = self.data.select(pl.count()).collect().item()
-            width = len(self.data.collect_schema().names())
+            # Use underlying LazyFrame for DocLazyFrame
+            lf = (
+                self.data.lazyframe
+                if isinstance(self.data, DocLazyFrame)
+                else self.data
+            )
+            height = lf.select(pl.count()).collect().item()
+            width = len(lf.collect_schema().names())
             info_dict["shape"] = (height, width)
 
         # Handle schema extraction differently for LazyFrames to avoid performance warnings
         schema = None
         if self.is_lazy:
-            schema = self.data.collect_schema()
+            # Use underlying LazyFrame for DocLazyFrame
+            if isinstance(self.data, DocLazyFrame):
+                schema = self.data.lazyframe.collect_schema()
+            else:
+                schema = self.data.collect_schema()
         else:
             schema = self.data.schema
 
