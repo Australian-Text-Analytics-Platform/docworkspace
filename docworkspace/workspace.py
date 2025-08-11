@@ -6,8 +6,7 @@ from typing import Any, Dict, Iterator, List, Optional, Union
 
 import polars as pl
 
-import docframe
-from docframe import DocDataFrame, DocLazyFrame
+import docframe  # noqa: F401  (ensures text namespace registration when imported)
 
 from .node import Node
 
@@ -241,21 +240,31 @@ class Workspace:
         """
         return [node for node in self.nodes.values() if not node.children]
 
-    def serialize(self, file_path: Union[str, Path]) -> None:
-        """
-        Serialize the workspace to a JSON file using the underlying data's serialization methods.
+    def serialize(self, file_path: Union[str, Path], format: str = "json") -> None:
+        """Serialize the workspace to disk.
+
+        Currently only 'json' format is supported. A future 'binary' format is reserved;
+        attempting to use it will raise NotImplementedError (to keep API stable).
+
+        Each node delegates to its own serialize() so underlying data types (DataFrame,
+        LazyFrame, DocDataFrame, DocLazyFrame) are preserved via their specific metadata.
 
         Args:
-            file_path: Path to save the workspace (will be saved as JSON)
+            file_path: Destination path. .json extension will be enforced for json format.
+            format: 'json' (supported) or 'binary' (reserved -> NotImplementedError)
         """
-        file_path = Path(file_path)
+        if format == "binary":  # Reserved
+            raise NotImplementedError("'binary' serialization not implemented yet")
+        if format != "json":
+            raise ValueError(f"Unsupported format: {format}")
 
-        # Ensure .json extension
+        file_path = Path(file_path)
         if file_path.suffix.lower() != ".json":
             file_path = file_path.with_suffix(".json")
 
-        # Prepare serialization data
         workspace_data = {
+            "format": format,
+            "version": 1,
             "id": self.id,
             "name": self.name,
             "metadata": self._metadata,
@@ -263,19 +272,16 @@ class Workspace:
             "relationships": [],
         }
 
-        # Serialize each node using its own serialization method
         for node_id, node in self.nodes.items():
             try:
-                serialized_node = node.serialize(format="json")
-                workspace_data["nodes"][node_id] = serialized_node
-            except Exception as e:
-                # If node serialization fails, fall back to basic info
+                workspace_data["nodes"][node_id] = node.serialize(format=format)
+            except Exception as e:  # pragma: no cover - defensive path
                 workspace_data["nodes"][node_id] = {
                     "node_metadata": {
                         "id": node.id,
                         "name": node.name,
                         "operation": node.operation,
-                        "data_type": f"{type(node.data).__class__.__module__}.{type(node.data).__name__}",
+                        "data_type": type(node.data).__name__,
                         "is_lazy": node.is_lazy,
                     },
                     "data_metadata": {"type": "error"},
@@ -283,71 +289,70 @@ class Workspace:
                     "error": str(e),
                 }
 
-        # Serialize relationships
         for node in self.nodes.values():
             for child in node.children:
                 workspace_data["relationships"].append(
                     {"parent_id": node.id, "child_id": child.id}
                 )
 
-        # Save to JSON file
         import json
 
-        with open(file_path, "w") as f:
-            json.dump(workspace_data, f, indent=2, default=str)
+        with open(file_path, "w", encoding="utf-8") as f:
+            json.dump(workspace_data, f, indent=2, ensure_ascii=False)
 
     @classmethod
-    def deserialize(cls, file_path: Union[str, Path]) -> "Workspace":
-        """
-        Deserialize a workspace from a JSON file using the nodes' deserialization methods.
+    def deserialize(
+        cls, file_path: Union[str, Path], format: str = "json"
+    ) -> "Workspace":
+        """Deserialize a workspace previously saved with serialize().
 
         Args:
-            file_path: Path to the serialized workspace JSON file
-
-        Returns:
-            Deserialized Workspace object
+            file_path: Path to workspace file.
+            format: Expected format ('json'). 'binary' reserved (NotImplementedError).
         """
-        file_path = Path(file_path)
+        if format == "binary":  # Reserved
+            raise NotImplementedError("'binary' deserialization not implemented yet")
+        if format != "json":
+            raise ValueError(f"Unsupported format: {format}")
 
-        # Load data from JSON file
+        file_path = Path(file_path)
         import json
 
-        with open(file_path, "r") as f:
+        with open(file_path, "r", encoding="utf-8") as f:
             workspace_data = json.load(f)
 
-        # Create workspace with empty nodes dict
+        # Allow file to specify format; validate
+        file_format = workspace_data.get("format", "json")
+        if file_format != format:
+            raise ValueError(
+                f"Format mismatch: file encoded as '{file_format}', expected '{format}'"
+            )
+
         workspace = cls.__new__(cls)
         workspace.id = workspace_data["id"]
         workspace.name = workspace_data["name"]
         workspace._metadata = workspace_data.get("metadata", {})
         workspace.nodes = {}
 
-        # Deserialize nodes using their own deserialization methods
         node_map = {}
         for node_id, serialized_node in workspace_data["nodes"].items():
-            if "error" in serialized_node:
-                # Skip nodes that failed to serialize
+            if (
+                isinstance(serialized_node, dict)
+                and serialized_node.get("data_metadata", {}).get("type") == "error"
+            ):
                 continue
-
             try:
-                node = Node.deserialize(serialized_node, workspace, format="json")
-                # Don't add to workspace again since Node.deserialize already does it
-                # Just track in node_map for relationship building
+                node = Node.deserialize(serialized_node, workspace, format=format)
                 node_map[node_id] = node
-            except Exception as e:
-                # Skip nodes that fail to deserialize
+            except Exception as e:  # pragma: no cover
                 print(f"Warning: Failed to deserialize node {node_id}: {e}")
                 continue
 
-        # Rebuild relationships
-        for relationship in workspace_data.get("relationships", []):
-            parent_id = relationship["parent_id"]
-            child_id = relationship["child_id"]
-
-            if parent_id in node_map and child_id in node_map:
-                parent = node_map[parent_id]
-                child = node_map[child_id]
-
+        for rel in workspace_data.get("relationships", []):
+            p_id, c_id = rel.get("parent_id"), rel.get("child_id")
+            if p_id in node_map and c_id in node_map:
+                parent = node_map[p_id]
+                child = node_map[c_id]
                 if child not in parent.children:
                     parent.children.append(child)
                 if parent not in child.parents:
