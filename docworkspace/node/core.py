@@ -1,0 +1,448 @@
+"""Node core definition (split from former monolithic node.py).
+
+Contains structural aspects: construction, parent/child tracking, schema helpers,
+materialization, serialization (kept minimal for workspace persistence),
+and core dataframe operations (join/filter/slice/dynamic delegation).
+"""
+
+from __future__ import annotations
+
+import uuid
+from enum import Enum
+from typing import Any, Dict, List, Literal, Optional
+
+import polars as pl
+
+from docframe import DocDataFrame, DocLazyFrame  # type: ignore  # runtime import
+
+if False:  # TYPE_CHECKING replacement to avoid runtime import cycle
+    from ..workspace.core import Workspace  # pragma: no cover
+
+# Supported data types
+SupportedDataTypes = pl.DataFrame | pl.LazyFrame | DocDataFrame | DocLazyFrame
+
+
+class NodeDataType(str, Enum):
+    DataFrame = "DataFrame"
+    LazyFrame = "LazyFrame"
+    DocDataFrame = "DocDataFrame"
+    DocLazyFrame = "DocLazyFrame"
+
+
+SerializableDataType = Literal[
+    "DataFrame",
+    "LazyFrame",
+    "DocDataFrame",
+    "DocLazyFrame",
+]
+
+
+def schema_to_json(schema: pl.Schema) -> Dict[str, str]:
+    """
+    Convert a Polars schema to a JSON-compatible dictionary.
+
+    Args:
+        schema: Polars Schema object
+
+    Returns:
+        Dictionary with column names as keys and their types as values
+    """
+
+    def python_type_to_str(type: Any) -> str:
+        """
+        Convert a Python type to its string representation for JSON compatibility.
+        """
+        match type:
+            case (
+                pl.Int8
+                | pl.Int16
+                | pl.Int32
+                | pl.Int64
+                | pl.UInt8
+                | pl.UInt16
+                | pl.UInt32
+                | pl.UInt64
+                | pl.Float32
+                | pl.Float64
+            ):
+                return "number"
+            case pl.String | pl.Utf8:  # Handle both String and Utf8 types
+                return "string"
+            case pl.Boolean:
+                return "boolean"
+            case pl.Date | pl.Datetime | pl.Time:
+                return "datetime"
+            case _:  # Fallback for any unmatched types
+                # Use string representation and apply same logic as FastAPIUtils
+                type_str = str(type).lower()
+                if any(x in type_str for x in ["int", "float", "double", "decimal"]):
+                    return "number"
+                elif any(x in type_str for x in ["str", "string", "utf8"]):
+                    return "string"
+                elif any(x in type_str for x in ["bool", "boolean"]):
+                    return "boolean"
+                elif any(x in type_str for x in ["date", "time", "datetime"]):
+                    return "datetime"
+                elif "list" in type_str:
+                    return "array"
+                else:
+                    return "string"  # Default fallback
+
+    return {k: python_type_to_str(v) for k, v in schema.items()}
+
+
+def extract_polars_data(data: SupportedDataTypes) -> pl.DataFrame | pl.LazyFrame:
+    """
+    Extract the underlying Polars DataFrame or LazyFrame from any supported data type.
+    
+    This is needed for operations like join that require native Polars objects.
+    """
+    if isinstance(data, (pl.DataFrame, pl.LazyFrame)):
+        return data
+    elif isinstance(data, DocDataFrame):
+        return data.to_polars()
+    elif isinstance(data, DocLazyFrame):
+        return data.to_lazyframe()
+    else:
+        raise TypeError(f"Unsupported data type: {type(data)}")
+
+
+class Node:
+    def __init__(
+        self,
+        data: SupportedDataTypes,
+        name: str | None = None,
+        workspace: Optional["Workspace"] = None,
+        parents: List["Node"] | None = None,
+        operation: str | None = None,
+    ) -> None:
+        from ..workspace.core import Workspace  # local import to avoid cycle
+
+        self.id = str(uuid.uuid4())
+        self.name = name or f"node_{self.id[:8]}"
+
+        if not isinstance(
+            data, (pl.DataFrame, pl.LazyFrame, DocDataFrame, DocLazyFrame)
+        ):
+            raise TypeError(
+                f"Unsupported data type: {type(data).__name__}. Node supports pl.DataFrame, pl.LazyFrame, DocDataFrame, DocLazyFrame."
+            )
+
+        self.data = data
+        self.parents: List[Node] = parents or []
+        self.children: List[Node] = []
+
+        if workspace is None:
+            workspace = Workspace(name=f"workspace_for_{self.name}")
+        self.workspace: Workspace = workspace  # type: ignore
+        self.operation = operation
+
+        if self.id not in self.workspace.nodes:
+            self.workspace.add_node(self)
+
+        for parent in self.parents:
+            parent.children.append(self)
+
+    # ------------------------------------------------------------------
+    # Delegation helpers
+    # ------------------------------------------------------------------
+    def _wrap_result(self, result: Any, op_name: str) -> Any:
+        """Wrap DataFrame-like results into a new Node preserving lineage.
+
+        Non-dataframe results (scalars, lists, etc.) are returned directly.
+        """
+        if isinstance(result, (pl.DataFrame, pl.LazyFrame, DocDataFrame, DocLazyFrame)):
+            return Node(
+                data=result,
+                name=f"{op_name}_{self.name}",
+                workspace=self.workspace,
+                parents=[self],
+                operation=op_name,
+            )
+        return result
+
+    def __getattr__(self, item: str) -> Any:  # pragma: no cover - thin wrapper
+        # Delegate attribute access to underlying data object. If it's a
+        # callable returning a dataframe-like object we convert result to Node.
+        attr = getattr(self.data, item)
+        if callable(attr):
+
+            def wrapper(*args, **kwargs):
+                result = attr(*args, **kwargs)
+                return self._wrap_result(result, item)
+
+            return wrapper
+        return attr
+
+    # Commonly accessed convenience properties (explicit to avoid delegation surprises)
+    @property
+    def shape(self):  # pragma: no cover - trivial delegation
+        return getattr(self.data, "shape", None)
+
+    @property
+    def columns(self):  # pragma: no cover
+        return getattr(self.data, "columns", [])
+
+    # ------------------------------------------------------------------
+    # Explicit graph-producing dataframe operations
+    # ------------------------------------------------------------------
+    def filter(self, predicate: Any) -> "Node":
+        df = self.data
+        if hasattr(df, "filter"):
+            result = getattr(df, "filter")(predicate)  # type: ignore[arg-type]
+            return Node(
+                data=result,
+                name=f"filter_{self.name}",
+                workspace=self.workspace,
+                parents=[self],
+                operation="filter",
+            )
+        raise AttributeError("Underlying data does not support filter")
+
+    def select(self, *columns: str) -> "Node":
+        df = self.data
+        if hasattr(df, "select"):
+            result = getattr(df, "select")(*columns)
+            return Node(
+                data=result,
+                name=f"select_{self.name}",
+                workspace=self.workspace,
+                parents=[self],
+                operation="select",
+            )
+        raise AttributeError("Underlying data does not support select")
+
+    def join(self, other: "Node", on: str | list[str], how: str = "inner") -> "Node":
+        # Extract underlying Polars data for both nodes
+        ldf = extract_polars_data(self.data)
+        rdf = extract_polars_data(other.data)
+        
+        # Ensure both are the same type for join operation
+        # If one is lazy and other is not, convert the eager one to lazy
+        if isinstance(ldf, pl.LazyFrame) and isinstance(rdf, pl.DataFrame):
+            rdf = rdf.lazy()
+        elif isinstance(ldf, pl.DataFrame) and isinstance(rdf, pl.LazyFrame):
+            ldf = ldf.lazy()
+        
+        if hasattr(ldf, "join"):
+            result = getattr(ldf, "join")(rdf, on=on, how=how)  # type: ignore[arg-type]
+            return Node(
+                data=result,
+                name=f"join_{self.name}_{other.name}",
+                workspace=self.workspace,
+                parents=[self, other],
+                operation=f"join({how})",
+            )
+        raise AttributeError("Underlying data does not support join")
+
+    def slice(self, *args, **kwargs) -> "Node":
+        """Return a sliced Node.
+
+        Supports both slice objects and (offset, length) signatures similar to
+        polars. Examples:
+            node.slice(0, 10)
+            node.slice(slice(0, 10))
+        """
+        df = self.data
+        offset: int | None = None
+        length: int | None = None
+        if args and isinstance(args[0], slice):
+            sl: slice = args[0]
+            offset = 0 if sl.start is None else sl.start
+            if sl.stop is not None:
+                length = sl.stop - offset
+        elif args:
+            offset = args[0]
+            if len(args) > 1:
+                length = args[1]
+        else:
+            offset = 0
+        if not hasattr(df, "slice"):
+            raise AttributeError("Underlying data does not support slice operation")
+        # polars slice signature slice(offset, length=None)
+        result = getattr(df, "slice")(offset, length)  # type: ignore[arg-type]
+        return Node(
+            data=result,
+            name=f"slice_{self.name}",
+            workspace=self.workspace,
+            parents=[self],
+            operation="slice",
+        )
+
+    # ------------------------------------------------------------------
+    # Properties
+    # ------------------------------------------------------------------
+    @property
+    def is_lazy(self) -> bool:
+        return isinstance(self.data, (pl.LazyFrame, DocLazyFrame))
+
+    @property
+    def document_column(self) -> Optional[str]:
+        if isinstance(self.data, (DocDataFrame, DocLazyFrame)):
+            return self.data.document_column
+        return None
+
+    # ------------------------------------------------------------------
+    # Schema / materialization utilities
+    # ------------------------------------------------------------------
+    def collect(self) -> "Node":
+        if (
+            self.is_lazy
+            and hasattr(self.data, "collect")
+            and callable(self.data.collect)
+        ):
+            try:
+                collected = self.data.collect()
+                new_node = Node(
+                    data=collected,
+                    name=f"collect_{self.name}",
+                    workspace=self.workspace,
+                    parents=[self],
+                    operation=f"collect({self.name})",
+                )
+                self.workspace.add_node(new_node)
+                return new_node
+            except Exception:
+                return self
+        return self
+
+    def materialize(self) -> "Node":
+        if (
+            self.is_lazy
+            and hasattr(self.data, "collect")
+            and callable(self.data.collect)
+        ):
+            try:
+                self.data = self.data.collect()
+            except Exception:
+                pass
+        return self
+
+    def json_schema(self) -> Dict[str, str]:
+        try:
+            schema = self.data.collect_schema() if self.is_lazy else self.data.schema
+            return schema_to_json(schema)
+        except Exception:
+            return {}
+
+    # ------------------------------------------------------------------
+    # Info / serialization (minimal)
+    # ------------------------------------------------------------------
+    def info(self, json: bool = False) -> Dict[str, Any]:
+        dtype = type(self.data)
+        info_dict: Dict[str, Any] = {
+            "id": self.id,
+            "name": self.name,
+            "dtype": dtype if not json else f"{dtype.__module__}.{dtype.__name__}",
+            "lazy": self.is_lazy,
+            "operation": self.operation,
+            "parent_ids": [p.id for p in self.parents],
+            "child_ids": [c.id for c in self.children],
+        }
+        if isinstance(self.data, (pl.DataFrame, DocDataFrame)):
+            info_dict["shape"] = getattr(self.data, "shape", (0, 0))
+        elif isinstance(self.data, (pl.LazyFrame, DocLazyFrame)):
+            lf = (
+                self.data.lazyframe
+                if isinstance(self.data, DocLazyFrame)
+                else self.data
+            )
+            try:
+                height = lf.select(pl.count()).collect().item()
+                width = len(lf.collect_schema().names())
+                info_dict["shape"] = (height, width)
+            except Exception:
+                info_dict["shape"] = (0, 0)
+        schema = None
+        try:
+            schema = self.data.collect_schema() if self.is_lazy else self.data.schema
+        except Exception:
+            pass
+        if schema is not None:
+            info_dict["schema"] = schema if not json else schema_to_json(schema)
+        else:
+            info_dict["schema"] = {}
+        if isinstance(self.data, (DocDataFrame, DocLazyFrame)):
+            info_dict["document_column"] = self.document_column
+        return info_dict
+
+    def _normalized_type(self) -> SerializableDataType:
+        if isinstance(self.data, DocDataFrame):
+            return "DocDataFrame"
+        if isinstance(self.data, DocLazyFrame):
+            return "DocLazyFrame"
+        if isinstance(self.data, pl.LazyFrame):
+            return "LazyFrame"
+        return "DataFrame"
+
+    def serialize(self, format: str = "json") -> Dict[str, Any]:
+        if format != "json":
+            raise ValueError(f"Unsupported format: {format}")
+        normalized = self._normalized_type()
+        if normalized in ("DocDataFrame", "DocLazyFrame"):
+            serialized_data = self.data.serialize(format="json")  # type: ignore[arg-type]
+        elif normalized == "LazyFrame":
+            # Store logical plan materialized for now (lossy but consistent with prior behavior)
+            serialized_data = self.data.collect().to_dict(as_series=False)  # type: ignore[union-attr]
+        else:  # DataFrame
+            serialized_data = self.data.to_dict(as_series=False)  # type: ignore[union-attr]
+        data_metadata = {"type": normalized}
+        return {
+            "node_metadata": {
+                "id": self.id,
+                "name": self.name,
+                "operation": self.operation,
+                "data_type": normalized,
+                "is_lazy": normalized in ("LazyFrame", "DocLazyFrame"),
+            },
+            "data_metadata": data_metadata,
+            "serialized_data": serialized_data,
+        }
+
+    @classmethod
+    def deserialize(
+        cls,
+        serialized_node: Dict[str, Any],
+        workspace: "Workspace",
+        format: str = "json",
+    ) -> "Node":
+        import polars as pl
+
+        from docframe import DocDataFrame, DocLazyFrame
+
+        if format != "json":
+            raise ValueError(f"Unsupported format: {format}")
+
+        node_meta = serialized_node["node_metadata"]
+        data_meta = serialized_node["data_metadata"]
+        data_blob = serialized_node["serialized_data"]
+        data_type = data_meta["type"]
+        if data_type == "DocDataFrame":
+            data = DocDataFrame.deserialize(data_blob, format="json")
+        elif data_type == "DocLazyFrame":
+            data = DocLazyFrame.deserialize(data_blob, format="json")
+        elif data_type in ["DataFrame", "LazyFrame"]:
+            df = pl.DataFrame(data_blob)
+            data = df.lazy() if data_type == "LazyFrame" else df
+        else:
+            raise ValueError(f"Unknown data type: {data_meta['type']}")
+        node = cls.__new__(cls)
+        node.id = node_meta["id"]
+        node.name = node_meta["name"]
+        node.data = data
+        node.parents = []
+        node.children = []
+        node.workspace = workspace
+        node.operation = node_meta["operation"]
+        workspace.nodes[node.id] = node
+        return node
+
+    # Representation --------------------------------------------------
+    def __repr__(self) -> str:  # pragma: no cover
+        return (
+            f"Node(id={self.id[:8]}, name='{self.name}', dtype={type(self.data).__name__}, "
+            f"lazy={self.is_lazy}, parents={len(self.parents)}, children={len(self.children)})"
+        )
+
+
+__all__ = ["Node", "schema_to_json"]

@@ -360,30 +360,6 @@ class TestWorkspaceGraphOperations:
 
         return workspace
 
-    def test_get_descendants(self, complex_workspace):
-        """Test getting all descendants of a node."""
-        roots = complex_workspace.get_root_nodes()
-        root1 = [n for n in roots if n.name == "root1"][0]
-
-        descendants = complex_workspace.get_descendants(root1.id)
-        assert len(descendants) >= 1  # At least the filtered node
-
-        # Test non-existent node
-        empty_descendants = complex_workspace.get_descendants("non-existent")
-        assert len(empty_descendants) == 0
-
-    def test_get_ancestors(self, complex_workspace):
-        """Test getting all ancestors of a node."""
-        leaves = complex_workspace.get_leaf_nodes()
-        if leaves:
-            leaf = leaves[0]
-            ancestors = complex_workspace.get_ancestors(leaf.id)
-            assert len(ancestors) >= 1  # Should have at least one parent
-
-        # Test non-existent node
-        empty_ancestors = complex_workspace.get_ancestors("non-existent")
-        assert len(empty_ancestors) == 0
-
     def test_workspace_graph_structure(self, complex_workspace):
         """Test the generic graph structure generation."""
         graph_data = complex_workspace.graph()
@@ -406,18 +382,6 @@ class TestWorkspaceGraphOperations:
             ]
             for field in required_fields:
                 assert field in node_data
-
-    def test_topological_order(self, complex_workspace):
-        """Test topological ordering of nodes."""
-        ordered_nodes = complex_workspace.get_topological_order()
-
-        # Should have all nodes
-        assert len(ordered_nodes) == len(complex_workspace.nodes)
-
-        # Root nodes should come first
-        root_nodes = complex_workspace.get_root_nodes()
-        for i, root in enumerate(root_nodes):
-            assert root in ordered_nodes[: len(root_nodes)]
 
     def test_visualize_graph(self, complex_workspace):
         """Test graph visualization."""

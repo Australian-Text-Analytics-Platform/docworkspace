@@ -1,11 +1,11 @@
-"""DocWorkspace
+"""docworkspace public API exports after module split.
 
-A library for managing DataFrames and DocDataFrames with parent-child relationships
-and lazy evaluation capabilities.
+Provides backward compatibility for original imports while exposing
+serialization, analysis, and graph helpers in dedicated submodules.
 """
 
-from .node import Node
-from .workspace import Workspace
+from .node import Node  # package exposing Node
+from .workspace import Workspace  # shim -> workspace.core.Workspace
 
 __version__ = "0.1.0"
-__all__ = ["Node", "Workspace"]
+__all__ = ["Workspace", "Node"]
