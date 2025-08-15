@@ -38,60 +38,6 @@ SerializableDataType = Literal[
 ]
 
 
-def schema_to_json(schema: pl.Schema) -> Dict[str, str]:
-    """
-    Convert a Polars schema to a JSON-compatible dictionary.
-
-    Args:
-        schema: Polars Schema object
-
-    Returns:
-        Dictionary with column names as keys and their types as values
-    """
-
-    def python_type_to_str(type: Any) -> str:
-        """
-        Convert a Python type to its string representation for JSON compatibility.
-        """
-        match type:
-            case (
-                pl.Int8
-                | pl.Int16
-                | pl.Int32
-                | pl.Int64
-                | pl.UInt8
-                | pl.UInt16
-                | pl.UInt32
-                | pl.UInt64
-                | pl.Float32
-                | pl.Float64
-            ):
-                return "number"
-            case pl.String | pl.Utf8:  # Handle both String and Utf8 types
-                return "string"
-            case pl.Boolean:
-                return "boolean"
-            case pl.Date | pl.Datetime | pl.Time:
-                return "datetime"
-            case _:  # Fallback for any unmatched types
-                # Use string representation and apply same logic as FastAPIUtils
-                type_str = str(type).lower()
-                if any(x in type_str for x in ["int", "float", "double", "decimal"]):
-                    return "number"
-                elif any(x in type_str for x in ["str", "string", "utf8"]):
-                    return "string"
-                elif any(x in type_str for x in ["bool", "boolean"]):
-                    return "boolean"
-                elif any(x in type_str for x in ["date", "time", "datetime"]):
-                    return "datetime"
-                elif "list" in type_str:
-                    return "array"
-                else:
-                    return "string"  # Default fallback
-
-    return {k: python_type_to_str(v) for k, v in schema.items()}
-
-
 def extract_polars_data(data: SupportedDataTypes) -> pl.DataFrame | pl.LazyFrame:
     """
     Extract the underlying Polars DataFrame or LazyFrame from any supported data type.
@@ -317,21 +263,28 @@ class Node:
         return self
 
     def json_schema(self) -> Dict[str, str]:
+        """Return raw schema - JSON conversion should be handled by API layer."""
         try:
             schema = self.data.collect_schema() if self.is_lazy else self.data.schema
-            return schema_to_json(schema)
+            # Return raw schema as dict for API layer to convert
+            return {col: str(dtype) for col, dtype in schema.items()} if schema else {}
         except Exception:
             return {}
 
     # ------------------------------------------------------------------
     # Info / serialization (minimal)
     # ------------------------------------------------------------------
-    def info(self, json: bool = False) -> Dict[str, Any]:
+    def info(self) -> Dict[str, Any]:
+        """Get node information with raw schema data.
+
+        Returns raw Polars schema - JSON type conversion should be handled
+        by the API layer, not in the core docworkspace library.
+        """
         dtype = type(self.data)
         info_dict: Dict[str, Any] = {
             "id": self.id,
             "name": self.name,
-            "dtype": dtype if not json else f"{dtype.__module__}.{dtype.__name__}",
+            "dtype": dtype,  # Return actual type object - API layer will convert to string
             "lazy": self.is_lazy,
             "operation": self.operation,
             "parent_ids": [p.id for p in self.parents],
@@ -357,7 +310,8 @@ class Node:
         except Exception:
             pass
         if schema is not None:
-            info_dict["schema"] = schema if not json else schema_to_json(schema)
+            # Always return raw schema - API layer will convert to JS types
+            info_dict["schema"] = schema
         else:
             info_dict["schema"] = {}
         if isinstance(self.data, (DocDataFrame, DocLazyFrame)):
@@ -377,7 +331,15 @@ class Node:
         if format != "json":
             raise ValueError(f"Unsupported format: {format}")
         normalized = self._normalized_type()
-        serialized_data = self.data.serialize(format="json")
+
+        # Suppress the deprecation warning for LazyFrame serialization
+        # This is mainly used for testing and persistence
+        import warnings
+
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", UserWarning)
+            serialized_data = self.data.serialize(format="json")
+
         data_metadata = {"type": normalized}
         return {
             "node_metadata": {
@@ -416,8 +378,8 @@ class Node:
         # as a (very long) file path, triggering OSError: File name too long.
         # We detect non-path strings and wrap them in StringIO so Polars treats them as
         # file-like objects containing the serialized payload.
-        from pathlib import Path as _P
         from io import StringIO
+        from pathlib import Path as _P
 
         def _wrap(blob: Any):  # type: ignore[override]
             if isinstance(blob, str):
@@ -460,4 +422,4 @@ class Node:
         )
 
 
-__all__ = ["Node", "schema_to_json"]
+__all__ = ["Node"]

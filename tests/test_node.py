@@ -2,9 +2,9 @@
 
 import polars as pl
 import pytest
-from docworkspace import Node, Workspace
 
 from docframe import DocDataFrame, DocLazyFrame
+from docworkspace import Node, Workspace
 
 
 class TestNode:
@@ -187,11 +187,12 @@ class TestNode:
         assert "schema" in info  # Schema should be present instead of columns
         assert len(info["schema"]) == 2  # Should have 2 columns
 
-        # Test JSON mode
-        json_info = node.info(json=True)
-        assert json_info["dtype"] == "polars.dataframe.frame.DataFrame"
-        assert isinstance(json_info["schema"], dict)
-        assert all(isinstance(v, str) for v in json_info["schema"].values())
+        # Test that info returns raw types (no JSON conversion in core library)
+        raw_info = node.info()
+        # dtype should be the actual type object, not a string
+        assert raw_info["dtype"] == pl.DataFrame
+        # schema should be raw Polars schema, not converted to JS types
+        assert hasattr(raw_info["schema"], "items")  # Polars schema has items() method
 
     def test_node_repr(self, sample_df):
         """Test string representation of Node."""

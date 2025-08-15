@@ -342,6 +342,7 @@ class TestWorkspaceSerialization:
         try:
             populated_workspace.serialize(temp_path)
             import json as _json
+
             with open(temp_path, "r", encoding="utf-8") as fh:
                 data = _json.load(fh)
             assert "workspace_metadata" in data
