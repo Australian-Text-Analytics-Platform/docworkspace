@@ -12,6 +12,7 @@ from enum import Enum
 from typing import Any, Dict, List, Literal, Optional
 
 import polars as pl
+from polars import DataFrame, LazyFrame
 
 from docframe import DocDataFrame, DocLazyFrame  # type: ignore  # runtime import
 
@@ -19,7 +20,7 @@ if False:  # TYPE_CHECKING replacement to avoid runtime import cycle
     from ..workspace.core import Workspace  # pragma: no cover
 
 # Supported data types
-SupportedDataTypes = pl.DataFrame | pl.LazyFrame | DocDataFrame | DocLazyFrame
+SupportedDataTypes = DataFrame | LazyFrame | DocDataFrame | DocLazyFrame
 
 
 class NodeDataType(str, Enum):
@@ -94,7 +95,7 @@ def schema_to_json(schema: pl.Schema) -> Dict[str, str]:
 def extract_polars_data(data: SupportedDataTypes) -> pl.DataFrame | pl.LazyFrame:
     """
     Extract the underlying Polars DataFrame or LazyFrame from any supported data type.
-    
+
     This is needed for operations like join that require native Polars objects.
     """
     if isinstance(data, (pl.DataFrame, pl.LazyFrame)):
@@ -121,16 +122,13 @@ class Node:
         self.id = str(uuid.uuid4())
         self.name = name or f"node_{self.id[:8]}"
 
-        if not isinstance(
-            data, (pl.DataFrame, pl.LazyFrame, DocDataFrame, DocLazyFrame)
-        ):
-            raise TypeError(
-                f"Unsupported data type: {type(data).__name__}. Node supports pl.DataFrame, pl.LazyFrame, DocDataFrame, DocLazyFrame."
-            )
+        assert isinstance(data, SupportedDataTypes), (
+            f"Unsupported data type: {type(data).__name__}. Node supports pl.DataFrame, pl.LazyFrame, DocDataFrame, DocLazyFrame."
+        )
 
         self.data = data
-        self.parents: List[Node] = parents or []
-        self.children: List[Node] = []
+        self.parents: list[Node] = parents or []
+        self.children: list[Node] = []
 
         if workspace is None:
             workspace = Workspace(name=f"workspace_for_{self.name}")
@@ -216,14 +214,14 @@ class Node:
         # Extract underlying Polars data for both nodes
         ldf = extract_polars_data(self.data)
         rdf = extract_polars_data(other.data)
-        
+
         # Ensure both are the same type for join operation
         # If one is lazy and other is not, convert the eager one to lazy
         if isinstance(ldf, pl.LazyFrame) and isinstance(rdf, pl.DataFrame):
             rdf = rdf.lazy()
         elif isinstance(ldf, pl.DataFrame) and isinstance(rdf, pl.LazyFrame):
             ldf = ldf.lazy()
-        
+
         if hasattr(ldf, "join"):
             result = getattr(ldf, "join")(rdf, on=on, how=how)  # type: ignore[arg-type]
             return Node(
@@ -379,13 +377,7 @@ class Node:
         if format != "json":
             raise ValueError(f"Unsupported format: {format}")
         normalized = self._normalized_type()
-        if normalized in ("DocDataFrame", "DocLazyFrame"):
-            serialized_data = self.data.serialize(format="json")  # type: ignore[arg-type]
-        elif normalized == "LazyFrame":
-            # Store logical plan materialized for now (lossy but consistent with prior behavior)
-            serialized_data = self.data.collect().to_dict(as_series=False)  # type: ignore[union-attr]
-        else:  # DataFrame
-            serialized_data = self.data.to_dict(as_series=False)  # type: ignore[union-attr]
+        serialized_data = self.data.serialize(format="json")
         data_metadata = {"type": normalized}
         return {
             "node_metadata": {
@@ -417,15 +409,17 @@ class Node:
         data_meta = serialized_node["data_metadata"]
         data_blob = serialized_node["serialized_data"]
         data_type = data_meta["type"]
-        if data_type == "DocDataFrame":
-            data = DocDataFrame.deserialize(data_blob, format="json")
-        elif data_type == "DocLazyFrame":
-            data = DocLazyFrame.deserialize(data_blob, format="json")
-        elif data_type in ["DataFrame", "LazyFrame"]:
-            df = pl.DataFrame(data_blob)
-            data = df.lazy() if data_type == "LazyFrame" else df
-        else:
-            raise ValueError(f"Unknown data type: {data_meta['type']}")
+        match data_type:
+            case "DocDataFrame":
+                data = DocDataFrame.deserialize(data_blob, format="json")
+            case "DocLazyFrame":
+                data = DocLazyFrame.deserialize(data_blob, format="json")
+            case "DataFrame":
+                data = pl.DataFrame.deserialize(data_blob, format="json")
+            case "LazyFrame":
+                data = pl.LazyFrame.deserialize(data_blob, format="json")
+            case _:
+                raise ValueError(f"Unknown data type: {data_meta['type']}")
         node = cls.__new__(cls)
         node.id = node_meta["id"]
         node.name = node_meta["name"]
