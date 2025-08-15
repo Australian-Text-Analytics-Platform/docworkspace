@@ -159,8 +159,8 @@ class TestWorkspace:
         root2 = workspace.add_node(
             Node(data=sample_df.lazy(), name="root2", workspace=workspace)
         )
-        child1 = root1.filter(pl.col("value") > 1)
-        child2 = root2.filter(pl.col("value") > 2)
+        root1.filter(pl.col("value") > 1)
+        root2.filter(pl.col("value") > 2)
 
         summary = workspace.summary()
 
@@ -221,13 +221,13 @@ class TestWorkspaceSerialization:
         root2 = workspace.add_node(Node(data=df2, name="root2", workspace=workspace))
 
         # Create relationships
-        filtered = root1.filter(pl.col("category") == "A")
-        merged = root1.join(root2, on="id")
+        root1.filter(pl.col("category") == "A")
+        root1.join(root2, on="id")
 
         return workspace
 
-    def test_pickle_serialization(self, populated_workspace):
-        """Test workspace serialization using JSON format (pickle no longer supported)."""
+    def test_workspace_serialization_roundtrip(self, populated_workspace):
+        """Round-trip workspace serialization using JSON format (pickle removed)."""
         with tempfile.NamedTemporaryFile(suffix=".json", delete=False) as f:
             temp_path = f.name
 
@@ -258,7 +258,7 @@ class TestWorkspaceSerialization:
             os.unlink(temp_path)
 
     def test_json_serialization(self, populated_workspace):
-        """Test workspace serialization using JSON format."""
+        """Explicit JSON serialization test (legacy name retained for compatibility)."""
         with tempfile.NamedTemporaryFile(suffix=".json", delete=False) as f:
             temp_path = f.name
 
@@ -287,7 +287,7 @@ class TestWorkspaceSerialization:
         lazy_node = workspace.add_node(
             Node(data=lazy_df, name="lazy_node", workspace=workspace)
         )
-        filtered_lazy = lazy_node.filter(pl.col("a") > 1)
+        lazy_node.filter(pl.col("a") > 1)
 
         with tempfile.NamedTemporaryFile(suffix=".json", delete=False) as f:
             temp_path = f.name
@@ -334,6 +334,26 @@ class TestWorkspaceSerialization:
         assert loaded.name == workspace.name
         assert len(loaded.nodes) == 1
         assert loaded.get_node_by_name("test_df") is not None
+
+    def test_workspace_serialized_file_structure(self, populated_workspace):
+        """Validate on-disk JSON structure contains expected envelope keys."""
+        with tempfile.NamedTemporaryFile(suffix=".json", delete=False) as f:
+            temp_path = f.name
+        try:
+            populated_workspace.serialize(temp_path)
+            import json as _json
+            with open(temp_path, "r", encoding="utf-8") as fh:
+                data = _json.load(fh)
+            assert "workspace_metadata" in data
+            assert "nodes" in data
+            assert isinstance(data["nodes"], list)
+            # Ensure each node entry has required composite sections
+            for n in data["nodes"]:
+                for key in ("node_metadata", "data_metadata", "serialized_data"):
+                    assert key in n
+                assert isinstance(n["serialized_data"], str)
+        finally:
+            os.unlink(temp_path)
 
 
 class TestWorkspaceGraphOperations:

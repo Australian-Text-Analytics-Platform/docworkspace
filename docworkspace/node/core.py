@@ -409,17 +409,38 @@ class Node:
         data_meta = serialized_node["data_metadata"]
         data_blob = serialized_node["serialized_data"]
         data_type = data_meta["type"]
-        match data_type:
-            case "DocDataFrame":
-                data = DocDataFrame.deserialize(data_blob, format="json")
-            case "DocLazyFrame":
-                data = DocLazyFrame.deserialize(data_blob, format="json")
-            case "DataFrame":
-                data = pl.DataFrame.deserialize(data_blob, format="json")
-            case "LazyFrame":
-                data = pl.LazyFrame.deserialize(data_blob, format="json")
-            case _:
-                raise ValueError(f"Unknown data type: {data_meta['type']}")
+
+        # Polars/DocFrame .serialize(format="json") returns a JSON string (or array-string)
+        # that DataFrame.deserialize expects as a file path *unless* provided a file-like.
+        # The previous implementation passed the raw string causing it to be interpreted
+        # as a (very long) file path, triggering OSError: File name too long.
+        # We detect non-path strings and wrap them in StringIO so Polars treats them as
+        # file-like objects containing the serialized payload.
+        from pathlib import Path as _P
+        from io import StringIO
+
+        def _wrap(blob: Any):  # type: ignore[override]
+            if isinstance(blob, str):
+                try:
+                    p = _P(blob)
+                    # Treat as real path only if it exists on disk and is reasonably short
+                    if p.exists():
+                        return blob
+                except Exception:  # pragma: no cover - path edge cases
+                    pass
+                return StringIO(blob)
+            return blob
+
+        if data_type == "DocDataFrame":
+            data = DocDataFrame.deserialize(_wrap(data_blob), format="json")
+        elif data_type == "DocLazyFrame":
+            data = DocLazyFrame.deserialize(_wrap(data_blob), format="json")
+        elif data_type == "DataFrame":
+            data = pl.DataFrame.deserialize(_wrap(data_blob), format="json")
+        elif data_type == "LazyFrame":
+            data = pl.LazyFrame.deserialize(_wrap(data_blob), format="json")
+        else:
+            raise ValueError(f"Unknown data type: {data_meta['type']}")
         node = cls.__new__(cls)
         node.id = node_meta["id"]
         node.name = node_meta["name"]
