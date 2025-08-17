@@ -1,6 +1,4 @@
 import json
-import sys
-from pathlib import Path
 
 import polars as pl
 import pytest
@@ -8,11 +6,6 @@ import pytest
 from docframe import DocDataFrame, DocLazyFrame  # type: ignore
 from docworkspace.node import Node  # type: ignore
 from docworkspace.workspace import Workspace  # type: ignore
-
-# Adjust path last (tests typically run with package root already discoverable)
-ROOT = Path(__file__).resolve().parents[2]
-if str(ROOT) not in sys.path:  # pragma: no cover
-    sys.path.insert(0, str(ROOT))
 
 
 def build_sample_objects():
@@ -58,12 +51,12 @@ def test_workspace_serialize_deserialize_preserves_types(tmp_path):
     docdf_node = next(n for n in ws2.nodes.values() if n.name == "docdf")
     assert isinstance(docdf_node.data, DocDataFrame)
     assert docdf_node.data.document_column == "text"
-    assert docdf_node.data.to_polars().shape == (2, 1)
+    assert docdf_node.data.to_dataframe().shape == (2, 1)
 
     doclazy_node = next(n for n in ws2.nodes.values() if n.name == "doclazy")
     assert isinstance(doclazy_node.data, DocLazyFrame)
     collected = doclazy_node.data.collect()
-    assert collected.to_polars().shape[0] == 2
+    assert collected.to_dataframe().shape[0] == 2
 
 
 def test_workspace_binary_not_implemented(tmp_path):
@@ -76,16 +69,14 @@ def test_workspace_binary_not_implemented(tmp_path):
     # Create a dummy json file to attempt binary deserialize and confirm error
     dummy = tmp_path / "ws.json"
     dummy.write_text(
-        json.dumps(
-            {
-                "format": "json",
-                "id": "x",
-                "name": "n",
-                "metadata": {},
-                "nodes": {},
-                "relationships": [],
-            }
-        )
+        json.dumps({
+            "format": "json",
+            "id": "x",
+            "name": "n",
+            "metadata": {},
+            "nodes": {},
+            "relationships": [],
+        })
     )
     with pytest.raises(NotImplementedError):
         Workspace.deserialize(dummy, format="binary")

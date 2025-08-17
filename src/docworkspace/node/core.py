@@ -47,7 +47,7 @@ def extract_polars_data(data: SupportedDataTypes) -> pl.DataFrame | pl.LazyFrame
     if isinstance(data, (pl.DataFrame, pl.LazyFrame)):
         return data
     elif isinstance(data, DocDataFrame):
-        return data.to_polars()
+        return data.to_dataframe()
     elif isinstance(data, DocLazyFrame):
         return data.to_lazyframe()
     else:
@@ -339,7 +339,6 @@ class Node:
         with warnings.catch_warnings():
             warnings.simplefilter("ignore", UserWarning)
             serialized_data = self.data.serialize(format="json")
-
         data_metadata = {"type": normalized}
         return {
             "node_metadata": {
