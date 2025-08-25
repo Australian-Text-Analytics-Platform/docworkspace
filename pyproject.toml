@@ -9,7 +9,7 @@ dependencies = [
     "polars>=0.20.0",
     "docframe",
     "typing-extensions",
-    "ipykernel>=6.29.5",
+    "ipykernel",
 ]
 
 [build-system]
