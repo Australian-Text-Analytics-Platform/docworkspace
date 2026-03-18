@@ -15,14 +15,24 @@ DocWorkspace provides a workspace-based approach to data analysis, where data tr
 ## Installation
 
 ```bash
-pip install docworkspace
+pip install "docworkspace>=0.2.0"
+```
+
+`docworkspace` is published on PyPI as a pure-Python package.
+
+### Install From Source
+
+```bash
+git clone https://github.com/Australian-Text-Analytics-Platform/docworkspace.git
+cd docworkspace
+uv sync --group dev
 ```
 
 ### Dependencies
 
 - Python ≥ 3.14
 - polars
-- polars-text
+- polars-text >= 0.1.0
 
 For FastAPI integration:
 
@@ -218,7 +228,7 @@ def custom_transform(node: Node, operation_name: str) -> Node:
     """Apply custom transformation and track the operation."""
     # Your custom logic here
     result_data = node.data.with_columns(pl.col("value") * 2)
-    
+
     # Create new node with relationship tracking
     return Node(
         data=result_data,
@@ -502,44 +512,64 @@ for node in workspace.get_leaf_nodes():
 
 ```bash
 # Install development dependencies
-pip install pytest
+uv sync --group dev
 
 # Run all tests
-pytest
+uv run pytest
 
 # Run with coverage
-pytest --cov=docworkspace
+uv run pytest --cov=docworkspace
 
 # Run specific test file
-pytest tests/test_workspace.py -v
+uv run pytest tests/test_workspace.py -v
 ```
+
+### Building Distributions
+
+```bash
+uv build
+```
+
+This produces a universal wheel and source distribution suitable for PyPI.
 
 ### Contributing
 
 1. Fork the repository
 2. Create a feature branch: `git checkout -b feature-name`
 3. Make your changes and add tests
-4. Run the test suite: `pytest`
+4. Run the test suite: `uv run pytest`
 5. Submit a pull request
 
 ### Project Structure
 
 ```text
 docworkspace/
-├── docworkspace/           # Main package
-│   ├── __init__.py        # Package exports
-│   ├── node.py            # Node class implementation
-│   ├── workspace.py       # Workspace class implementation
-│   ├── api_models.py      # FastAPI Pydantic models
-│   └── api_utils.py       # FastAPI utility functions
+├── .github/
+│   └── workflows/         # CI and release automation
+├── src/
+│   └── docworkspace/
+│       ├── __init__.py    # Public package exports
+│       ├── node/
+│       │   ├── __init__.py
+│       │   ├── core.py    # Node implementation
+│       │   └── io.py      # Node serialization helpers
+│       └── workspace/
+│           ├── __init__.py
+│           ├── core.py    # Workspace implementation
+│           ├── io.py      # Workspace serialization helpers
+│           └── analysis.py
 ├── tests/                 # Test suite
-│   ├── test_node.py       # Node class tests
-│   ├── test_workspace.py  # Workspace class tests
-│   ├── test_integration.py # Integration tests
-│   └── test_coverage.py   # Coverage tests
-├── examples/              # Example scripts and data
-├── README.md             # This file
-└── pyproject.toml        # Project configuration
+│   ├── conftest.py
+│   ├── test_fastapi_integration.py
+│   ├── test_node.py
+│   ├── test_node_io.py
+│   ├── test_simple_operations.py
+│   ├── test_workspace.py
+│   ├── test_workspace_serialization_types.py
+│   └── test_workspace_shim.py
+├── PUBLISH.md             # Release runbook
+├── README.md              # This file
+└── pyproject.toml         # Project configuration
 ```
 
 ## License
@@ -548,15 +578,12 @@ Part of the LDaCA (Language Data Commons of Australia) ecosystem.
 
 ## Changelog
 
-### Version 0.1.0
+### Version 0.2.0
 
-- Initial release
-- Core Node and Workspace functionality
-- Support for Polars data types
-- Lazy evaluation support
-- FastAPI integration
-- Serialization capabilities
-- Comprehensive test suite
+- Published on PyPI as `docworkspace`
+- PyPI consumers can install the package directly instead of relying on a local workspace checkout
+- Added release automation and publishing runbook for future releases
+- Continued support for Polars data types, lazy evaluation, FastAPI integration, and serialization
 
 ## Related Projects
 
