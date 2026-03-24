@@ -1,7 +1,10 @@
 """Tests for the Node class."""
 
+from typing import cast
+
 import polars as pl
 import pytest
+
 from docworkspace import Node, Workspace
 
 
@@ -82,7 +85,7 @@ class TestNode:
 
         assert len(sliced.parents) == 1
         assert sliced.parents[0] == node
-        assert sliced.data.collect().height == 2
+        assert cast(pl.DataFrame, sliced.data.collect()).height == 2
 
     def test_node_drop_creates_child_and_drops_column(self, sample_df):
         """Dropping columns returns a child node with updated schema."""
@@ -303,11 +306,13 @@ class TestNodeRelationships:
     @pytest.fixture
     def sample_df(self):
         """Create a sample DataFrame."""
-        return pl.DataFrame({
-            "id": [1, 2, 3, 4, 5],
-            "category": ["A", "B", "A", "B", "C"],
-            "value": [10, 20, 30, 40, 50],
-        })
+        return pl.DataFrame(
+            {
+                "id": [1, 2, 3, 4, 5],
+                "category": ["A", "B", "A", "B", "C"],
+                "value": [10, 20, 30, 40, 50],
+            }
+        )
 
     def test_filter_creates_parent_child_relationship(self, workspace, sample_df):
         """Test that filter operation creates proper parent-child relationship."""
@@ -375,4 +380,5 @@ class TestNodeRelationships:
         assert parent1 in merged.parents
         assert parent2 in merged.parents
         assert merged in parent1.children
+        assert merged in parent2.children
         assert merged in parent2.children

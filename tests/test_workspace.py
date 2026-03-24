@@ -3,9 +3,11 @@
 import os
 import tempfile
 from pathlib import Path
+from typing import Any, cast
 
 import polars as pl
 import pytest
+
 from docworkspace import Node, Workspace
 
 
@@ -203,11 +205,13 @@ class TestWorkspaceSerialization:
         workspace.modified_at = "2024-01-01T12:00:00Z"
 
         # Create nodes
-        df1 = pl.DataFrame({
-            "id": [1, 2, 3],
-            "category": ["A", "B", "A"],
-            "value": [10, 20, 30],
-        })
+        df1 = pl.DataFrame(
+            {
+                "id": [1, 2, 3],
+                "category": ["A", "B", "A"],
+                "value": [10, 20, 30],
+            }
+        )
 
         df2 = pl.DataFrame({"id": [1, 2, 3], "extra": ["x", "y", "z"]})
 
@@ -323,7 +327,7 @@ class TestWorkspaceSerialization:
     def test_load_from_dict_rejected(self):
         """Workspace.load should accept path-like values only."""
         with pytest.raises(TypeError):
-            Workspace.load({"workspace_metadata": {}, "nodes": []})
+            cast(Any, Workspace.load)({"workspace_metadata": {}, "nodes": []})
 
     def test_workspace_serialized_file_structure(self, populated_workspace):
         """Validate on-disk JSON structure contains expected envelope keys."""
@@ -449,11 +453,13 @@ class TestWorkspaceGraphOperations:
     def test_workspace_csv_loading(self):
         """Test explicit CSV loading workflow for workspaces."""
         # Create a temporary CSV file
-        df = pl.DataFrame({
-            "name": ["Alice", "Bob", "Charlie"],
-            "age": [25, 30, 35],
-            "city": ["NYC", "LA", "Chicago"],
-        })
+        df = pl.DataFrame(
+            {
+                "name": ["Alice", "Bob", "Charlie"],
+                "age": [25, 30, 35],
+                "city": ["NYC", "LA", "Chicago"],
+            }
+        )
 
         with tempfile.NamedTemporaryFile(mode="w", suffix=".csv", delete=False) as f:
             df.write_csv(f.name)
@@ -602,4 +608,5 @@ class TestWorkspaceGraphOperations:
         assert node_b in node_d.parents
         assert node_c in node_d.parents
         assert node_a not in node_d.parents
+        assert node_a not in workspace.nodes.values()
         assert node_a not in workspace.nodes.values()

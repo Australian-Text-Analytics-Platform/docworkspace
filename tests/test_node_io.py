@@ -1,8 +1,10 @@
 import json
 import os
 from pathlib import Path
+from typing import cast
 
 import polars as pl
+
 from docworkspace import Node, Workspace
 from docworkspace.node.io import dumps, from_dict, loads, to_dict
 
@@ -36,7 +38,7 @@ def test_node_to_dict_persists_lazyframe_payload(tmp_path: Path):
     data_file = tmp_path / payload["data_path"]
     assert data_file.exists()
     restored = pl.LazyFrame.deserialize(data_file.open("rb"), format="binary")
-    assert restored.collect().to_dict(as_series=False) == {
+    assert cast(pl.DataFrame, restored.collect()).to_dict(as_series=False) == {
         "text": ["a", "b"],
         "value": [1, 2],
     }
@@ -62,7 +64,9 @@ def test_node_exposes_instance_and_class_serialization_helpers(tmp_path: Path):
 
     assert payload["node_metadata"]["id"] == node.id
     assert restored.id == node.id
-    assert restored.data.collect().to_dict(as_series=False) == {"value": [1, 2, 3]}
+    assert cast(pl.DataFrame, restored.data.collect()).to_dict(as_series=False) == {
+        "value": [1, 2, 3]
+    }
 
 
 def test_node_dumps_returns_json_payload_and_persists_data_file(tmp_path: Path):
@@ -110,7 +114,7 @@ def test_node_from_dict_restores_node_state(tmp_path: Path):
     assert restored.children == []
     assert restored.can_undo is False
     assert restored.can_redo is False
-    assert restored.data.collect().to_dict(as_series=False) == {
+    assert cast(pl.DataFrame, restored.data.collect()).to_dict(as_series=False) == {
         "text": ["x", "y"],
         "value": [10, 20],
     }
@@ -136,7 +140,9 @@ def test_node_loads_round_trip_from_json_string(tmp_path: Path):
 
     assert restored.id == node.id
     assert restored.name == "round_trip"
-    assert restored.data.collect().to_dict(as_series=False) == {"value": [3, 4]}
+    assert cast(pl.DataFrame, restored.data.collect()).to_dict(as_series=False) == {
+        "value": [3, 4]
+    }
 
 
 def test_node_from_dict_uses_constructor_defaults_for_runtime_state(tmp_path: Path):
@@ -225,4 +231,5 @@ def test_node_from_dict_ignores_missing_parent_ids(tmp_path: Path):
         base_dir=tmp_path,
     )
 
+    assert restored.parents == []
     assert restored.parents == []

@@ -79,7 +79,7 @@ def from_dict(
     if workspace is None:
         return Node(data=lf, workspace=None, parents=list(parent_ids), **node_metadata)
 
-    parents = [
+    parents: list[Node | str] = [
         workspace.nodes[parent_id]
         for parent_id in parent_ids
         if parent_id in workspace.nodes
