@@ -1,12 +1,12 @@
 [project]
 name = "docworkspace"
-version = "0.2.0"
+version = "0.2.1"
 description = "A workspace library for managing Polars dataframes with parent-child relationships and lazy evaluation"
 readme = "README.md"
 requires-python = ">=3.14"
 dependencies = [
     "polars",
-    "polars-text>=0.1.0",
+    "polars-text>=0.1.1",
 ]
 
 [project.optional-dependencies]
