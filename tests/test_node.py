@@ -1,6 +1,7 @@
 """Tests for the Node class."""
 
-from typing import cast
+from inspect import signature
+from typing import Optional, Sequence, cast, get_type_hints
 
 import polars as pl
 import pytest
@@ -52,6 +53,23 @@ class TestNode:
         assert node.workspace is None
         assert node.parents == ["parent-123"]
         assert node.children == []
+
+    def test_node_init_contract_uses_non_optional_parents(self):
+        """Constructor type contract should not advertise optional parents."""
+        hints = get_type_hints(
+            Node.__init__,
+            globalns={
+                "Node": Node,
+                "Workspace": Workspace,
+                "Sequence": Sequence,
+                "Optional": Optional,
+                "pl": pl,
+            },
+        )
+
+        assert hints["name"] is str
+        assert hints["parents"] == Sequence[Node | str]
+        assert signature(Node.__init__).parameters["parents"].default == ()
 
     def test_node_lazy_status_polars_dataframe(self, sample_df):
         """Test lazy status for polars DataFrame."""

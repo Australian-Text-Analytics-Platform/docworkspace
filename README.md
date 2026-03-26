@@ -1,6 +1,6 @@
 # DocWorkspace
 
-A powerful Python library for managing Polars DataFrames and LazyFrames with parent-child relationships, lazy evaluation, and FastAPI integration. Part of the LDaCA (Language Data Commons of Australia) ecosystem.
+A powerful Python library for managing Polars LazyFrames with parent-child relationships, lazy evaluation, and FastAPI integration. Part of the LDaCA (Language Data Commons of Australia) ecosystem.
 
 ## Overview
 
@@ -8,7 +8,7 @@ DocWorkspace provides a workspace-based approach to data analysis, where data tr
 
 - **Relationship Tracking**: Understand data lineage and transformation history
 - **Lazy Evaluation**: Optimize performance with Polars LazyFrames
-- **Multiple Data Types**: Support for Polars DataFrames and LazyFrames
+- **LazyFrame-Native Graphs**: Node data is stored as Polars LazyFrames
 - **FastAPI Integration**: Ready-to-use models and utilities for web APIs
 - **Serialization**: Save and restore entire workspaces with their relationships
 
@@ -55,8 +55,8 @@ df = pl.DataFrame({
     "score": [0.8, 0.9, 0.95]
 })
 
-# Add data to workspace
-data_node = workspace.add_node(Node(df, name="raw_data"))
+# Convert to LazyFrame before adding data to the workspace
+data_node = workspace.add_node(Node(df.lazy(), name="raw_data"))
 
 # Apply transformations (creates new nodes automatically)
 filtered = data_node.filter(pl.col("score") > 0.85)
@@ -75,16 +75,17 @@ print(workspace.visualize_graph())
 
 ### Node
 
-A `Node` wraps your data (DataFrames, LazyFrames) and tracks relationships with other nodes. Nodes support:
+A `Node` wraps a Polars `LazyFrame` and tracks relationships with other nodes. Nodes support:
 
 - **Transparent Data Access**: All DataFrame methods work directly on nodes
+- **Transparent Data Access**: All LazyFrame methods work directly on nodes
 - **Automatic Relationship Tracking**: Operations create child nodes
 - **Lazy Evaluation**: Maintains laziness for performance
 - **Metadata**: Store operation descriptions and custom metadata
 
 ```python
-# Node automatically creates workspace if none provided
-node = Node(df, name="my_data")
+# Convert eager data before creating a node when needed
+node = Node(df.lazy(), name="my_data")
 
 # All DataFrame operations work directly
 filtered_node = node.filter(pl.col("value") > 10)
@@ -121,28 +122,23 @@ leaves = workspace.get_leaf_nodes()
 
 ## Supported Data Types
 
-DocWorkspace supports multiple data types from the Polars ecosystem:
+DocWorkspace stores node data as Polars `LazyFrame` objects.
 
-### Polars Types
-
-- **`pl.DataFrame`**: Materialized, in-memory data
-- **`pl.LazyFrame`**: Lazy evaluation for performance optimization
-
-### Example with Different Types
+### Creating LazyFrame Nodes
 
 ```python
 import polars as pl
 
-# Polars DataFrame (eager)
+# Convert an eager Polars DataFrame when needed
 df = pl.DataFrame({"text": ["hello", "world"], "id": [1, 2]})
-node1 = Node(df, "eager_data")
+node1 = Node(df.lazy(), "eager_data")
 
 # Polars LazyFrame (lazy)
 lazy_df = pl.LazyFrame({"text": ["foo", "bar"], "id": [3, 4]})
 node2 = Node(lazy_df, "lazy_data")
 
-# All work seamlessly in the same workspace
-workspace = Workspace("mixed_types")
+# Both nodes remain LazyFrames inside the workspace
+workspace = Workspace("lazyframe_nodes")
 for node in [node1, node2]:
     workspace.add_node(node)
 ```
@@ -173,7 +169,7 @@ Understand your data lineage:
 
 ```python
 # Create a processing pipeline
-raw_data = Node(df, "raw")
+raw_data = Node(df.lazy(), "raw")
 cleaned = raw_data.filter(pl.col("value").is_not_null())
 normalized = cleaned.with_columns(pl.col("value") / pl.col("value").max())
 final = normalized.select(["id", "normalized_value"])
@@ -272,7 +268,7 @@ df = pl.DataFrame({
     "metadata": ["type1", "type2", "type1"]
 })
 
-node = Node(df, "corpus")
+node = Node(df.lazy(), "corpus")
 node.document = "text"
 
 # Document metadata is preserved across operations
@@ -293,7 +289,7 @@ Node(data, name=None, workspace=None, parents=None, operation=None)
 #### Properties
 
 - `document: Optional[str]` - Document column tracked in node metadata
-- `data: DataFrame | LazyFrame` - Underlying frame-like object
+- `data: pl.LazyFrame` - Underlying frame-like object
 
 #### Methods
 
@@ -302,9 +298,9 @@ Node(data, name=None, workspace=None, parents=None, operation=None)
 - `info(json=False) -> Dict` - Get node information
 - `json_schema() -> Dict[str, str]` - Get JSON-compatible schema
 
-#### DataFrame Operations
+#### Data Operations
 
-All Polars DataFrame/LazyFrame operations are available directly:
+All Polars LazyFrame operations are available directly:
 
 - `filter(condition) -> Node`
 - `select(columns) -> Node`
@@ -400,7 +396,7 @@ df = pl.DataFrame({
 workspace = Workspace("text_analysis")
 
 # Track the document column for text analysis
-corpus = workspace.add_node(Node(df, "full_corpus"))
+corpus = workspace.add_node(Node(df.lazy(), "full_corpus"))
 corpus.document = "text"
 
 # Filter by category

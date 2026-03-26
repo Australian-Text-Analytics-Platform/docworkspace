@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import uuid
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Dict, Literal, Optional, cast
+from typing import TYPE_CHECKING, Any, Dict, Literal, Optional, Sequence, cast
 
 import polars as pl
 
@@ -27,9 +27,9 @@ class Node:
     def __init__(
         self,
         data: pl.LazyFrame,
-        name: str | None = None,
+        name: str,
         workspace: Optional["Workspace"] = None,
-        parents: list["Node | str"] | None = None,
+        parents: Sequence["Node | str"] = (),
         operation: str | None = None,
         id: str | None = None,
         document: str | None = None,
@@ -46,7 +46,7 @@ class Node:
         self._redo_stack: list[pl.LazyFrame] = []
         self._data: pl.LazyFrame = data
         self._document_column: Optional[str] = document
-        self.parents: list[Node | str] = list(parents or [])
+        self.parents: list[Node | str] = list(parents)
         self.workspace: Optional[Workspace] = workspace
         self.operation = operation
 
