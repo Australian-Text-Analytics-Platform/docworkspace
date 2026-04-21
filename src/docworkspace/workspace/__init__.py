@@ -8,9 +8,11 @@ analysis and graph views so internal relative imports
 from .analysis import graph_json  # noqa: F401
 from .analysis import info_json  # noqa: F401
 from .core import Workspace  # noqa: F401
+from .io import rebase_workspace_sources  # noqa: F401
 
 __all__ = [
     "Workspace",
     "info_json",
     "graph_json",
+    "rebase_workspace_sources",
 ]

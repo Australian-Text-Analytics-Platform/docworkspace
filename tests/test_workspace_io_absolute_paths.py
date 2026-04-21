@@ -11,6 +11,7 @@ from polars_text import list_source_paths
 
 from docworkspace.node import Node
 from docworkspace.workspace import Workspace
+from docworkspace.workspace.io import rebase_workspace_sources
 
 
 def _make_parquet(path: Path, df: pl.DataFrame) -> None:
@@ -49,7 +50,9 @@ def test_save_removes_orphan_parquet_and_plbin(tmp_path: Path):
     assert any(Path(s) == kept_parquet.resolve() for s in sources)
 
 
-def test_load_rebases_source_paths_after_workspace_move(tmp_path: Path):
+def test_rebase_then_load_after_workspace_move(tmp_path: Path):
+    """Simulate the real backend flow: rebase plbin files, then load workspace."""
+
     original_root = tmp_path / "original"
     original_root.mkdir()
     data_dir = original_root / "data"
@@ -67,6 +70,9 @@ def test_load_rebases_source_paths_after_workspace_move(tmp_path: Path):
     shutil.copytree(original_root, moved_root)
     shutil.rmtree(original_root)
 
+    # Rebase on disk BEFORE loading (mirrors backend set_current_workspace).
+    rebase_workspace_sources(moved_root)
+
     ws_reloaded = Workspace.load(moved_root)
     assert len(ws_reloaded.nodes) == 1
     node = next(iter(ws_reloaded.nodes.values()))
@@ -78,3 +84,45 @@ def test_load_rebases_source_paths_after_workspace_move(tmp_path: Path):
     sources = list_source_paths(plbin_files[0])
     moved_parquet = (moved_root / "data" / "input.parquet").resolve()
     assert all(Path(s) == moved_parquet for s in sources)
+
+
+def test_rebase_then_rename_then_save_keeps_parquet(tmp_path: Path):
+    """Repro for the reported bug: rename folder after save, then load + unload.
+
+    Sequence:
+      1. Save workspace in folder A.
+      2. Rename folder A → B (simulating user rename).
+      3. rebase_workspace_sources(B)  →  plbin paths point at B/data/…
+      4. Load workspace from B.
+      5. Save workspace back to B.
+      6. Parquet referenced by the node must survive GC.
+    """
+
+    folder_a = tmp_path / "Test"
+    folder_a.mkdir()
+    data_dir = folder_a / "data"
+    data_dir.mkdir()
+
+    parquet_path = data_dir / "my_data.parquet"
+    _make_parquet(parquet_path, pl.DataFrame({"v": [100, 200]}))
+
+    ws = Workspace(name="Test", ws_root_dir=folder_a)
+    ws.add_node(Node(data=pl.scan_parquet(parquet_path.resolve()), name="node"))
+    ws.save(folder_a)
+
+    # User renames the folder on disk.
+    folder_b = tmp_path / "Test_New"
+    folder_a.rename(folder_b)
+
+    # Backend flow: rebase → load → (later) save.
+    rebase_workspace_sources(folder_b)
+    ws2 = Workspace.load(folder_b)
+    assert len(ws2.nodes) == 1
+
+    # Verify data is accessible after rename.
+    node = next(iter(ws2.nodes.values()))
+    assert cast(pl.DataFrame, node.data.collect()).to_series().to_list() == [100, 200]
+
+    # Save (triggers GC) — the parquet must survive.
+    ws2.save(folder_b)
+    assert (folder_b / "data" / "my_data.parquet").exists()

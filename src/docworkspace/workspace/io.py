@@ -152,18 +152,34 @@ def read_workspace(path: Union[str, Path]) -> "Workspace":
     workspace.created_at = ws_meta.get("created_at")
     workspace.modified_at = ws_meta.get("modified_at")
 
+    for node_entry in data.get("nodes", []):
+        workspace.add_node(node_from_dict(node_entry, workspace=workspace))
+
+    return workspace
+
+
+def rebase_workspace_sources(path: Union[str, Path]) -> None:
+    """Rewrite stale scan source paths inside every plbin listed in ``metadata.json``.
+
+    Call this **after** the workspace folder has reached its final location on
+    disk (i.e. after any rename / move) but **before** deserializing the
+    workspace nodes into memory, so that ``LazyFrame.deserialize`` sees paths
+    that match the current filesystem.
+    """
+
+    target = _resolve_metadata_path(Path(path))
+    data = read_workspace_metadata(path)
     data_dir = (target.parent / NODE_DATA_DIR).resolve()
+
     for node_entry in data.get("nodes", []):
         plbin_abs = (target.parent / Path(str(node_entry["data_path"]))).resolve()
         if plbin_abs.exists():
             _rebase_plan_sources(plbin_abs, data_dir)
-        workspace.add_node(node_from_dict(node_entry, workspace=workspace))
-
-    return workspace
 
 
 __all__ = [
     "write_workspace",
     "read_workspace_metadata",
     "read_workspace",
+    "rebase_workspace_sources",
 ]
