@@ -1,10 +1,14 @@
 [project]
 name = "docworkspace"
-version = "0.2.5"
+version = "0.2.6"
 description = "A workspace library for managing Polars dataframes with parent-child relationships and lazy evaluation"
 readme = "README.md"
 requires-python = ">=3.14"
-dependencies = ["polars-text>=0.1.4"]
+# polars-text 0.1.6 enables polars-plan's `nightly` Cargo feature, which is
+# required to deserialize plans containing `.str.to_titlecase()` (and other
+# nightly-gated DslPlan variants) emitted by Python polars wheels. Older
+# polars-text wheels fail with `unknown variant 'Titlecase'` on those plans.
+dependencies = ["polars-text>=0.1.6"]
 
 [build-system]
 requires = ["hatchling"]
