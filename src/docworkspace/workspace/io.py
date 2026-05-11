@@ -68,6 +68,11 @@ def _garbage_collect_workspace_data(
     * Parquet files not referenced by any registered node's plan are deleted.
     * Plbin files whose name does not match a registered node's ``data_path``
       are deleted (they belong to nodes no longer in the workspace).
+
+    Dotfiles are **always skipped**. By convention they are out-of-band caches
+    (e.g. analysis side-effect parquets under
+    ``.materialized_<feature>_<task_id>_<node_id>.parquet``) whose lifecycle
+    is managed by their creators, not by the workspace.
     """
 
     data_dir = ws_root_dir / NODE_DATA_DIR
@@ -85,6 +90,8 @@ def _garbage_collect_workspace_data(
 
     for candidate in data_dir.iterdir():
         if not candidate.is_file():
+            continue
+        if candidate.name.startswith("."):
             continue
         suffix = candidate.suffix.lower()
         if suffix == ".plbin":

@@ -50,6 +50,36 @@ def test_save_removes_orphan_parquet_and_plbin(tmp_path: Path):
     assert any(Path(s) == kept_parquet.resolve() for s in sources)
 
 
+def test_save_keeps_dotfile_parquets(tmp_path: Path):
+    """Dotfile parquets are out-of-band caches and must survive GC.
+
+    Analysis side-effect parquets (e.g.
+    ``.materialized_concordance_<task_id>_<node_id>.parquet``) are owned by
+    background analysis tasks, not by workspace nodes. Their lifecycle is
+    managed by the analysis_cache module; the workspace GC must leave them
+    alone.
+    """
+    ws_root = tmp_path / "ws"
+    ws_root.mkdir()
+    data_dir = ws_root / "data"
+    data_dir.mkdir()
+
+    kept_parquet = data_dir / "kept.parquet"
+    _make_parquet(kept_parquet, pl.DataFrame({"a": [1]}))
+
+    cache_parquet = data_dir / ".materialized_concordance_TASK_NODE.parquet"
+    _make_parquet(cache_parquet, pl.DataFrame({"b": [2]}))
+
+    ws = Workspace(name="dotfile_ws", ws_root_dir=ws_root)
+    ws.add_node(Node(data=pl.scan_parquet(kept_parquet.resolve()), name="kept"))
+    ws.save(ws_root)
+
+    assert cache_parquet.exists(), (
+        "Dotfile parquet must survive workspace.save() GC — it's a cache "
+        "owned by an analysis task, not the workspace."
+    )
+
+
 def test_rebase_then_load_after_workspace_move(tmp_path: Path):
     """Simulate the real backend flow: rebase plbin files, then load workspace."""
 
