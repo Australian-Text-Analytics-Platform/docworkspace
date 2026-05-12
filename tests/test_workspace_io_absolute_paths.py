@@ -156,3 +156,67 @@ def test_rebase_then_rename_then_save_keeps_parquet(tmp_path: Path):
     # Save (triggers GC) — the parquet must survive.
     ws2.save(folder_b)
     assert (folder_b / "data" / "my_data.parquet").exists()
+
+
+def test_rebase_preserves_tokenized_node_after_move(tmp_path: Path):
+    """Phase 2.9 regression: a node with a List[Struct] tokens column must
+    survive workspace-folder move + rebase_workspace_sources. The rebasing
+    walks scan-source paths inside the plbin, not the dataframe schema, so
+    it should be schema-agnostic — this test locks that in."""
+
+    folder_a = tmp_path / "Tokens"
+    folder_a.mkdir()
+    data_dir = folder_a / "data"
+    data_dir.mkdir()
+
+    parquet_path = data_dir / "docs.parquet"
+    _make_parquet(parquet_path, pl.DataFrame({"text": ["doc one", "doc two"]}))
+
+    ws = Workspace(name="Tokens", ws_root_dir=folder_a)
+    base_node = Node(
+        data=pl.scan_parquet(parquet_path.resolve()),
+        name="docs",
+        language="zh",
+        tokenizer_model="jieba",
+    )
+    ws.add_node(base_node)
+
+    # Synthesize a tokens column on top via with_columns (LazyFrame plan;
+    # represents what worker_tasks_tokenize will produce in Phase 2.3).
+    tokens_frame = base_node.data.with_columns(
+        pl.lit([{"token": "doc", "start": 0, "end": 3}, {"token": "one", "start": 4, "end": 7}])
+        .alias("TOKENS_tokens")
+    )
+    tokens_node = Node(
+        data=tokens_frame,
+        name="docs_tokens",
+        parents=[base_node],
+        operation="tokenize",
+        language="zh",
+        tokenizer_model="jieba",
+    )
+    ws.add_node(tokens_node)
+    ws.save(folder_a)
+
+    # Move the workspace folder to a new location.
+    folder_b = tmp_path / "Tokens_Moved"
+    shutil.copytree(folder_a, folder_b)
+    shutil.rmtree(folder_a)
+
+    rebase_workspace_sources(folder_b)
+    ws2 = Workspace.load(folder_b)
+
+    # Both nodes should be back, and the tokens node's lineage + metadata
+    # preserved.
+    assert len(ws2.nodes) == 2
+    loaded_tokens_node = next(
+        n for n in ws2.nodes.values() if n.name == "docs_tokens"
+    )
+    assert loaded_tokens_node.language == "zh"
+    assert loaded_tokens_node.tokenizer_model == "jieba"
+    assert loaded_tokens_node.operation == "tokenize"
+
+    # The List[Struct] column should still be loadable end-to-end.
+    collected = cast(pl.DataFrame, loaded_tokens_node.data.collect())
+    assert "TOKENS_tokens" in collected.columns
+    assert collected.height == 2
