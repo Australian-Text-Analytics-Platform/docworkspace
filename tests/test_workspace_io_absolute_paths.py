@@ -176,24 +176,29 @@ def test_rebase_preserves_tokenized_node_after_move(tmp_path: Path):
     base_node = Node(
         data=pl.scan_parquet(parquet_path.resolve()),
         name="docs",
-        language="zh",
-        tokenizer_model="jieba",
     )
     ws.add_node(base_node)
 
-    # Synthesize a tokens column on top via with_columns (LazyFrame plan;
-    # represents what worker_tasks_tokenize will produce in Phase 2.3).
+    # Synthesize a derived tokens column on top via with_columns (LazyFrame
+    # plan; represents what worker_tasks_tokenize will produce in Phase 2.3).
+    derived_name = "__derived__.tokens.text.jieba"
+    derived_meta = {
+        "source_column": "text",
+        "form": "tokens",
+        "model": "jieba",
+        "language": "zh",
+        "generated_at": "2026-05-12T00:00:00+00:00",
+    }
     tokens_frame = base_node.data.with_columns(
         pl.lit([{"token": "doc", "start": 0, "end": 3}, {"token": "one", "start": 4, "end": 7}])
-        .alias("TOKENS_tokens")
+        .alias(derived_name)
     )
     tokens_node = Node(
         data=tokens_frame,
         name="docs_tokens",
         parents=[base_node],
         operation="tokenize",
-        language="zh",
-        tokenizer_model="jieba",
+        derived={derived_name: derived_meta},
     )
     ws.add_node(tokens_node)
     ws.save(folder_a)
@@ -212,11 +217,10 @@ def test_rebase_preserves_tokenized_node_after_move(tmp_path: Path):
     loaded_tokens_node = next(
         n for n in ws2.nodes.values() if n.name == "docs_tokens"
     )
-    assert loaded_tokens_node.language == "zh"
-    assert loaded_tokens_node.tokenizer_model == "jieba"
+    assert loaded_tokens_node.derived == {derived_name: derived_meta}
     assert loaded_tokens_node.operation == "tokenize"
 
     # The List[Struct] column should still be loadable end-to-end.
     collected = cast(pl.DataFrame, loaded_tokens_node.data.collect())
-    assert "TOKENS_tokens" in collected.columns
+    assert derived_name in collected.columns
     assert collected.height == 2

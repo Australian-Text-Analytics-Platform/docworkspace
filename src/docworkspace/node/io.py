@@ -47,8 +47,7 @@ def to_dict(node: Node, *, base_dir: str | Path | None = None) -> dict[str, Any]
             "name": node.name,
             "operation": node.operation,
             "document": node.document,
-            "language": node.language,
-            "tokenizer_model": node.tokenizer_model,
+            "derived": {name: dict(meta) for name, meta in node.derived.items()},
             "parents": [node._parent_id(parent) for parent in node.parents],
         },
         "data_path": rel_data_path.as_posix(),
@@ -66,6 +65,9 @@ def from_dict(
     node_metadata = dict(payload["node_metadata"])
     data_path = Path(str(payload["data_path"]))
     parent_ids = node_metadata.pop("parents", [])
+    # Legacy workspaces persisted before Phase 2 won't have ``derived`` at
+    # all; default to empty so loading stays backward compatible.
+    node_metadata.setdefault("derived", {})
 
     if workspace is not None:
         root_dir = Path(workspace.ws_root_dir)

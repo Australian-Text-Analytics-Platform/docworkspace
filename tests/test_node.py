@@ -1,12 +1,12 @@
 """Tests for the Node class."""
 
 from inspect import signature
-from typing import Optional, Sequence, cast, get_type_hints
+from typing import Mapping, Optional, Sequence, cast, get_type_hints
 
 import polars as pl
 import pytest
 
-from docworkspace import Node, Workspace
+from docworkspace import DerivedColumnMeta, Node, Workspace
 
 
 class TestNode:
@@ -63,6 +63,8 @@ class TestNode:
                 "Workspace": Workspace,
                 "Sequence": Sequence,
                 "Optional": Optional,
+                "Mapping": Mapping,
+                "DerivedColumnMeta": DerivedColumnMeta,
                 "pl": pl,
             },
         )

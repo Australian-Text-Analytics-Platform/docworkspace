@@ -19,8 +19,8 @@ class TestCoreLibraryIndependence:
         """Test that core library only exports core functionality."""
         from docworkspace import __all__
 
-        # Core library should only export Node and Workspace
-        expected_exports = {"Node", "Workspace"}
+        # Core library should only export Node, Workspace, and their typed helpers
+        expected_exports = {"Node", "Workspace", "DerivedColumnMeta"}
         actual_exports = set(__all__)
 
         assert actual_exports == expected_exports, (

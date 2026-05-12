@@ -30,8 +30,7 @@ def test_node_to_dict_persists_lazyframe_payload(tmp_path: Path):
             "name": "root",
             "operation": "source",
             "document": "text",
-            "language": None,
-            "tokenizer_model": None,
+            "derived": {},
             "parents": [],
         },
         "data_path": f"data/{node.id}.plbin",
@@ -237,39 +236,47 @@ def test_node_from_dict_ignores_missing_parent_ids(tmp_path: Path):
     assert restored.parents == []
 
 
-def test_node_language_and_tokenizer_metadata_round_trip(tmp_path: Path):
-    """Phase 2.4: language + tokenizer_model survive to_dict / from_dict."""
-    workspace = Workspace("node_io_lang")
+def test_node_derived_metadata_round_trip(tmp_path: Path):
+    """Phase 2.4 v2: Node.derived survives to_dict / from_dict."""
+    workspace = Workspace("node_io_derived")
     workspace.ws_root_dir = tmp_path
+    derived_name = "__derived__.tokens.text.jieba"
+    meta = {
+        "source_column": "text",
+        "form": "tokens",
+        "model": "jieba",
+        "language": "zh",
+        "generated_at": "2026-05-12T00:00:00+00:00",
+    }
     node = workspace.add_node(
         Node(
             data=pl.DataFrame({"text": ["今天天气很好"]}).lazy(),
             name="zh_root",
             workspace=workspace,
             operation="source",
-            language="zh",
-            tokenizer_model="jieba",
+            derived={derived_name: meta},  # type: ignore[arg-type]
         )
     )
     node.document = "text"
 
     payload = to_dict(node, base_dir=tmp_path)
-    assert payload["node_metadata"]["language"] == "zh"
-    assert payload["node_metadata"]["tokenizer_model"] == "jieba"
+    assert payload["node_metadata"]["derived"] == {derived_name: meta}
 
     # Round-trip into a fresh workspace
-    workspace2 = Workspace("node_io_lang_loaded")
+    workspace2 = Workspace("node_io_derived_loaded")
     workspace2.ws_root_dir = tmp_path
     restored = from_dict(payload, workspace=workspace2)
-    assert restored.language == "zh"
-    assert restored.tokenizer_model == "jieba"
+    assert restored.derived == {derived_name: meta}
+    assert restored.find_derived_column("text") == derived_name
+    assert restored.find_derived_column("text", model="jieba") == derived_name
+    assert restored.find_derived_column("text", model="other-model") is None
 
 
-def test_node_legacy_payload_without_language_loads_with_none_defaults(
+def test_node_legacy_payload_without_derived_loads_with_empty_dict(
     tmp_path: Path,
 ):
-    """Backward compat: old workspace JSONs lacking language/tokenizer_model
-    must still load, defaulting both to None."""
+    """Backward compat: workspaces persisted before Phase 2 lacking ``derived``
+    must still load, defaulting it to an empty dict."""
     workspace = Workspace("legacy_node_io")
     workspace.ws_root_dir = tmp_path
     node = workspace.add_node(
@@ -281,37 +288,122 @@ def test_node_legacy_payload_without_language_loads_with_none_defaults(
         )
     )
 
-    # Build a "legacy" payload — drop the new fields the way old files would.
+    # Build a "legacy" payload — strip the new field the way old files would.
     payload = to_dict(node, base_dir=tmp_path)
     legacy_metadata = dict(payload["node_metadata"])
-    legacy_metadata.pop("language", None)
-    legacy_metadata.pop("tokenizer_model", None)
+    legacy_metadata.pop("derived", None)
     legacy_payload = {**payload, "node_metadata": legacy_metadata}
 
     workspace2 = Workspace("legacy_loaded")
     workspace2.ws_root_dir = tmp_path
     restored = from_dict(legacy_payload, workspace=workspace2)
-    assert restored.language is None
-    assert restored.tokenizer_model is None
+    assert restored.derived == {}
 
 
-def test_node_derived_via_getattr_inherits_language(tmp_path: Path):
-    """Phase 2.4: language + tokenizer_model propagate to child nodes."""
-    workspace = Workspace("derive_lang")
+def test_node_derived_propagates_through_getattr(tmp_path: Path):
+    """Phase 2.4 v2: Node.derived propagates to children spawned by delegated
+    LazyFrame methods (schema-preserving ops like .head / .sort)."""
+    workspace = Workspace("derive_propagate")
     workspace.ws_root_dir = tmp_path
+    derived_name = "__derived__.tokens.text.jieba"
+    meta = {
+        "source_column": "text",
+        "form": "tokens",
+        "model": "jieba",
+        "language": "zh",
+        "generated_at": "2026-05-12T00:00:00+00:00",
+    }
     parent = workspace.add_node(
         Node(
             data=pl.DataFrame({"text": ["a", "b", "c"]}).lazy(),
             name="zh_parent",
             workspace=workspace,
             operation="source",
-            language="zh",
-            tokenizer_model="jieba",
+            derived={derived_name: meta},  # type: ignore[arg-type]
         )
     )
     parent.document = "text"
-    # Trigger a delegated LazyFrame method, which should produce a child Node
-    # that inherits the parent's language and tokenizer_model.
     child = parent.head(2)
-    assert child.language == "zh"
-    assert child.tokenizer_model == "jieba"
+    assert child.derived == {derived_name: meta}
+
+
+def test_node_drop_cascades_derived_columns(tmp_path: Path):
+    """Decision 7: dropping a source column auto-drops any derived columns
+    that reference it (both schema and metadata)."""
+    workspace = Workspace("derived_drop_cascade")
+    workspace.ws_root_dir = tmp_path
+    parent_lf = pl.DataFrame(
+        {
+            "text": ["a", "b"],
+            "other": [1, 2],
+            "__derived__.tokens.text.jieba": [
+                [{"token": "a", "start": 0, "end": 1}],
+                [{"token": "b", "start": 0, "end": 1}],
+            ],
+        }
+    ).lazy()
+    meta = {
+        "source_column": "text",
+        "form": "tokens",
+        "model": "jieba",
+        "language": "zh",
+        "generated_at": "2026-05-12T00:00:00+00:00",
+    }
+    parent = workspace.add_node(
+        Node(
+            data=parent_lf,
+            name="parent",
+            workspace=workspace,
+            derived={"__derived__.tokens.text.jieba": meta},  # type: ignore[arg-type]
+        )
+    )
+
+    # Dropping an UNRELATED column does NOT cascade.
+    survivor = parent.drop("other")
+    assert "__derived__.tokens.text.jieba" in survivor.derived
+    assert "__derived__.tokens.text.jieba" in survivor.data.collect_schema().names()
+
+    # Dropping the SOURCE column cascades: the derived column disappears from
+    # both the LazyFrame schema and the metadata index.
+    cascaded = parent.drop("text")
+    after_names = cascaded.data.collect_schema().names()
+    assert "__derived__.tokens.text.jieba" not in after_names
+    assert "__derived__.tokens.text.jieba" not in cascaded.derived
+
+
+def test_node_rename_cascades_derived_columns(tmp_path: Path):
+    """Decision 7: renaming a source column drops derived columns that
+    referenced it (they become stale; user can re-tokenise)."""
+    workspace = Workspace("derived_rename_cascade")
+    workspace.ws_root_dir = tmp_path
+    parent_lf = pl.DataFrame(
+        {
+            "text": ["a", "b"],
+            "__derived__.tokens.text.jieba": [
+                [{"token": "a", "start": 0, "end": 1}],
+                [{"token": "b", "start": 0, "end": 1}],
+            ],
+        }
+    ).lazy()
+    meta = {
+        "source_column": "text",
+        "form": "tokens",
+        "model": "jieba",
+        "language": "zh",
+        "generated_at": "2026-05-12T00:00:00+00:00",
+    }
+    node = workspace.add_node(
+        Node(
+            data=parent_lf,
+            name="rename_target",
+            workspace=workspace,
+            derived={"__derived__.tokens.text.jieba": meta},  # type: ignore[arg-type]
+        )
+    )
+
+    node.rename({"text": "body"})
+    after_names = node.data.collect_schema().names()
+    assert "body" in after_names
+    assert "text" not in after_names
+    assert "__derived__.tokens.text.jieba" not in after_names
+    assert node.derived == {}

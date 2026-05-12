@@ -8,12 +8,39 @@ from __future__ import annotations
 
 import uuid
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Dict, Literal, Optional, Sequence, cast
+from typing import (
+    TYPE_CHECKING,
+    Any,
+    Dict,
+    Literal,
+    Mapping,
+    Optional,
+    Sequence,
+    TypedDict,
+    cast,
+)
 
 import polars as pl
 
 if TYPE_CHECKING:  # pragma: no cover
     from ..workspace.core import Workspace  # pragma: no cover
+
+
+class DerivedColumnMeta(TypedDict):
+    """Metadata for a hidden derived analytic column (Phase 2, decision 7).
+
+    Derived columns live alongside the user's columns in the same LazyFrame
+    but are stripped from frontend-facing schema projections. ``source_column``
+    points at the originating user column; ``form`` says what kind of derivation
+    (``"tokens"``, future: ``"pos"``, ``"ner"``); ``model`` identifies the
+    backend that produced it (``"jieba"``, ``"bert-base-uncased"``, ...).
+    """
+
+    source_column: str
+    form: str
+    model: str
+    language: Optional[str]
+    generated_at: str
 
 
 class Node:
@@ -33,8 +60,7 @@ class Node:
         operation: str | None = None,
         id: str | None = None,
         document: str | None = None,
-        language: str | None = None,
-        tokenizer_model: str | None = None,
+        derived: Optional[Mapping[str, DerivedColumnMeta]] = None,
     ) -> None:
         self.id = id or str(uuid.uuid4())
         self.name = name or f"node_{self.id[:8]}"
@@ -48,12 +74,14 @@ class Node:
         self._redo_stack: list[pl.LazyFrame] = []
         self._data: pl.LazyFrame = data
         self._document_column: Optional[str] = document
-        # Language and tokenizer-model metadata for the pluggable_tokeniser
-        # work (Phase 2). Both live on the Node, NOT in the dataframe schema —
-        # they describe the corpus, not the data. None = unset (backward
-        # compatible with workspaces persisted before Phase 2).
-        self.language: Optional[str] = language
-        self.tokenizer_model: Optional[str] = tokenizer_model
+        # Per-column metadata for hidden derived analytic columns (Phase 2,
+        # decision 7). Keys are the derived column names that exist in the
+        # LazyFrame schema (e.g. "__derived__.tokens.text.jieba"); values
+        # carry source_column / form / model / language / generated_at.
+        # Empty dict on legacy nodes is fully backward compatible.
+        self.derived: dict[str, DerivedColumnMeta] = (
+            {k: dict(v) for k, v in derived.items()} if derived else {}
+        )  # type: ignore[assignment]
         self.parents: list[Node | str] = list(parents)
         self.workspace: Optional[Workspace] = workspace
         self.operation = operation
@@ -83,8 +111,7 @@ class Node:
                     workspace=self.workspace,
                     parents=[self],
                     operation=item,
-                    language=self.language,
-                    tokenizer_model=self.tokenizer_model,
+                    derived=self.derived,
                 )
                 if self.document:
                     child.document = self.document
@@ -148,16 +175,24 @@ class Node:
             workspace=self.workspace,
             parents=[self],
             operation="filter",
+            derived=self.derived,
         )
 
     def select(self, *exprs: Any, **named_exprs: Any) -> "Node":
         result = self.data.select(*exprs, **named_exprs)
+        # User-driven select may drop derived columns from the schema; keep
+        # only the derived metadata entries whose column still exists.
+        result_columns = set(result.collect_schema().names())
+        retained_derived = {
+            name: meta for name, meta in self.derived.items() if name in result_columns
+        }
         return Node(
             data=result,
             name=f"select_{self.name}",
             workspace=self.workspace,
             parents=[self],
             operation="select",
+            derived=retained_derived,
         )
 
     def join(
@@ -177,12 +212,21 @@ class Node:
         **kwargs: Any,
     ) -> "Node":
         result = self.data.join(other.data, on=on, how=how, **kwargs)
+        # Union derived metadata from both sides; result column set may drop
+        # entries if join columns collide, so filter to the resulting schema.
+        result_columns = set(result.collect_schema().names())
+        merged: dict[str, DerivedColumnMeta] = {}
+        for source in (self.derived, other.derived):
+            for name, meta in source.items():
+                if name in result_columns:
+                    merged[name] = meta
         return Node(
             data=result,
             name=f"join_{self.name}_{other.name}",
             workspace=self.workspace,
             parents=[self, other],
             operation=f"join({how})",
+            derived=merged,
         )
 
     def slice(self, offset: int, length: int | None = None) -> "Node":
@@ -193,6 +237,7 @@ class Node:
             workspace=self.workspace,
             parents=[self],
             operation="slice",
+            derived=self.derived,
         )
 
     def drop(
@@ -204,19 +249,36 @@ class Node:
         """Drop columns using Polars semantics and return a child node.
 
         Mirrors ``polars.LazyFrame.drop`` while preserving DocWorkspace lineage.
+        Cascade rule (decision 7): when a user column is dropped, any derived
+        columns whose ``source_column`` matched are also dropped and removed
+        from ``Node.derived``.
         """
+        before_names = set(self.data.collect_schema().names())
         result = self.data.drop(columns, *more_columns, strict=strict)
+        after_names = set(result.collect_schema().names())
+        dropped_sources = before_names - after_names
+
+        cascade_targets: list[str] = []
+        retained_derived: dict[str, DerivedColumnMeta] = {}
+        for derived_name, meta in self.derived.items():
+            if meta["source_column"] in dropped_sources and derived_name in after_names:
+                cascade_targets.append(derived_name)
+            elif derived_name in after_names:
+                retained_derived[derived_name] = meta
+
+        if cascade_targets:
+            result = result.drop(*cascade_targets, strict=False)
+
         child = Node(
             data=result,
             name=f"drop_{self.name}",
             workspace=self.workspace,
             parents=[self],
             operation="drop",
+            derived=retained_derived,
         )
 
         if self.document:
-            before_names = set(self.data.collect_schema().names())
-            after_names = set(result.collect_schema().names())
             if self.document in before_names and self.document not in after_names:
                 child.document = None
             else:
@@ -225,8 +287,30 @@ class Node:
         return child
 
     def rename(self, mapping: Any, *, strict: bool = True) -> "Node":
-        """Rename columns in-place using Polars semantics and return this node."""
-        self.data = self.data.rename(mapping, strict=strict)
+        """Rename columns in-place using Polars semantics and return this node.
+
+        Cascade rule (decision 7): renaming a source column makes any derived
+        columns referencing it stale — they are dropped from the LazyFrame and
+        from ``Node.derived``. Users can re-tokenise after the rename.
+        """
+        before_names = set(self.data.collect_schema().names())
+        new_data = self.data.rename(mapping, strict=strict)
+        after_names = set(new_data.collect_schema().names())
+        renamed_sources = before_names - after_names
+
+        if self.derived and renamed_sources:
+            cascade_targets = [
+                derived_name
+                for derived_name, meta in self.derived.items()
+                if meta["source_column"] in renamed_sources
+                and derived_name in after_names
+            ]
+            if cascade_targets:
+                new_data = new_data.drop(*cascade_targets, strict=False)
+                for name in cascade_targets:
+                    self.derived.pop(name, None)
+
+        self.data = new_data
 
         if self.document:
             new_document = self.document
@@ -282,6 +366,49 @@ class Node:
     @property
     def can_redo(self) -> bool:
         return len(self._redo_stack) > 0
+
+    # ------------------------------------------------------------------
+    # Derived-column metadata (Phase 2, decision 7)
+    # ------------------------------------------------------------------
+    def register_derived_column(
+        self, column_name: str, meta: DerivedColumnMeta
+    ) -> None:
+        """Record metadata for a hidden derived column on this node.
+
+        Caller is responsible for ensuring ``column_name`` exists in the
+        node's LazyFrame schema (typically after a ``with_columns(...)`` that
+        adds it). This method only writes the metadata index.
+        """
+        self.derived[column_name] = dict(meta)  # type: ignore[assignment]
+
+    def unregister_derived_column(self, column_name: str) -> bool:
+        """Remove the metadata entry for ``column_name``. Does not touch the
+        LazyFrame schema. Returns True if an entry was removed.
+        """
+        return self.derived.pop(column_name, None) is not None
+
+    def find_derived_column(
+        self,
+        source_column: str,
+        *,
+        form: str = "tokens",
+        model: str | None = None,
+    ) -> str | None:
+        """Return the name of a derived column for ``source_column``, or None.
+
+        Filters by ``form`` (default ``"tokens"``); if ``model`` is given,
+        further narrows to that backend. When multiple candidates match,
+        returns the first by insertion order.
+        """
+        for name, meta in self.derived.items():
+            if meta.get("source_column") != source_column:
+                continue
+            if meta.get("form") != form:
+                continue
+            if model is not None and meta.get("model") != model:
+                continue
+            return name
+        return None
 
     # ------------------------------------------------------------------
     # Schema utilities
@@ -342,4 +469,4 @@ class Node:
         )
 
 
-__all__ = ["Node"]
+__all__ = ["Node", "DerivedColumnMeta"]
