@@ -30,6 +30,8 @@ def test_node_to_dict_persists_lazyframe_payload(tmp_path: Path):
             "name": "root",
             "operation": "source",
             "document": "text",
+            "language": None,
+            "tokenizer_model": None,
             "parents": [],
         },
         "data_path": f"data/{node.id}.plbin",
@@ -233,3 +235,83 @@ def test_node_from_dict_ignores_missing_parent_ids(tmp_path: Path):
 
     assert restored.parents == []
     assert restored.parents == []
+
+
+def test_node_language_and_tokenizer_metadata_round_trip(tmp_path: Path):
+    """Phase 2.4: language + tokenizer_model survive to_dict / from_dict."""
+    workspace = Workspace("node_io_lang")
+    workspace.ws_root_dir = tmp_path
+    node = workspace.add_node(
+        Node(
+            data=pl.DataFrame({"text": ["今天天气很好"]}).lazy(),
+            name="zh_root",
+            workspace=workspace,
+            operation="source",
+            language="zh",
+            tokenizer_model="jieba",
+        )
+    )
+    node.document = "text"
+
+    payload = to_dict(node, base_dir=tmp_path)
+    assert payload["node_metadata"]["language"] == "zh"
+    assert payload["node_metadata"]["tokenizer_model"] == "jieba"
+
+    # Round-trip into a fresh workspace
+    workspace2 = Workspace("node_io_lang_loaded")
+    workspace2.ws_root_dir = tmp_path
+    restored = from_dict(payload, workspace=workspace2)
+    assert restored.language == "zh"
+    assert restored.tokenizer_model == "jieba"
+
+
+def test_node_legacy_payload_without_language_loads_with_none_defaults(
+    tmp_path: Path,
+):
+    """Backward compat: old workspace JSONs lacking language/tokenizer_model
+    must still load, defaulting both to None."""
+    workspace = Workspace("legacy_node_io")
+    workspace.ws_root_dir = tmp_path
+    node = workspace.add_node(
+        Node(
+            data=pl.DataFrame({"text": ["legacy"]}).lazy(),
+            name="legacy_root",
+            workspace=workspace,
+            operation="source",
+        )
+    )
+
+    # Build a "legacy" payload — drop the new fields the way old files would.
+    payload = to_dict(node, base_dir=tmp_path)
+    legacy_metadata = dict(payload["node_metadata"])
+    legacy_metadata.pop("language", None)
+    legacy_metadata.pop("tokenizer_model", None)
+    legacy_payload = {**payload, "node_metadata": legacy_metadata}
+
+    workspace2 = Workspace("legacy_loaded")
+    workspace2.ws_root_dir = tmp_path
+    restored = from_dict(legacy_payload, workspace=workspace2)
+    assert restored.language is None
+    assert restored.tokenizer_model is None
+
+
+def test_node_derived_via_getattr_inherits_language(tmp_path: Path):
+    """Phase 2.4: language + tokenizer_model propagate to child nodes."""
+    workspace = Workspace("derive_lang")
+    workspace.ws_root_dir = tmp_path
+    parent = workspace.add_node(
+        Node(
+            data=pl.DataFrame({"text": ["a", "b", "c"]}).lazy(),
+            name="zh_parent",
+            workspace=workspace,
+            operation="source",
+            language="zh",
+            tokenizer_model="jieba",
+        )
+    )
+    parent.document = "text"
+    # Trigger a delegated LazyFrame method, which should produce a child Node
+    # that inherits the parent's language and tokenizer_model.
+    child = parent.head(2)
+    assert child.language == "zh"
+    assert child.tokenizer_model == "jieba"

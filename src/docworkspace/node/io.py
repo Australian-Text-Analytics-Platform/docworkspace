@@ -47,6 +47,8 @@ def to_dict(node: Node, *, base_dir: str | Path | None = None) -> dict[str, Any]
             "name": node.name,
             "operation": node.operation,
             "document": node.document,
+            "language": node.language,
+            "tokenizer_model": node.tokenizer_model,
             "parents": [node._parent_id(parent) for parent in node.parents],
         },
         "data_path": rel_data_path.as_posix(),

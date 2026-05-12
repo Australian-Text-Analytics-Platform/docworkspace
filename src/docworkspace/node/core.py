@@ -33,6 +33,8 @@ class Node:
         operation: str | None = None,
         id: str | None = None,
         document: str | None = None,
+        language: str | None = None,
+        tokenizer_model: str | None = None,
     ) -> None:
         self.id = id or str(uuid.uuid4())
         self.name = name or f"node_{self.id[:8]}"
@@ -46,6 +48,12 @@ class Node:
         self._redo_stack: list[pl.LazyFrame] = []
         self._data: pl.LazyFrame = data
         self._document_column: Optional[str] = document
+        # Language and tokenizer-model metadata for the pluggable_tokeniser
+        # work (Phase 2). Both live on the Node, NOT in the dataframe schema —
+        # they describe the corpus, not the data. None = unset (backward
+        # compatible with workspaces persisted before Phase 2).
+        self.language: Optional[str] = language
+        self.tokenizer_model: Optional[str] = tokenizer_model
         self.parents: list[Node | str] = list(parents)
         self.workspace: Optional[Workspace] = workspace
         self.operation = operation
@@ -75,6 +83,8 @@ class Node:
                     workspace=self.workspace,
                     parents=[self],
                     operation=item,
+                    language=self.language,
+                    tokenizer_model=self.tokenizer_model,
                 )
                 if self.document:
                     child.document = self.document

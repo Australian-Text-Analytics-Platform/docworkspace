@@ -400,3 +400,36 @@ class TestNodeRelationships:
         assert merged in parent1.children
         assert merged in parent2.children
         assert merged in parent2.children
+
+
+def test_node_shape_does_not_materialise_list_columns():
+    """Phase 2.8: Node.shape must compute height without scanning list columns.
+
+    A future change that pushes Node.shape towards full collect() (e.g. via
+    .height instead of .select(pl.len())) would break tokenised nodes by
+    forcing the List[Struct] column to be materialised. Bound it loosely at
+    100ms on a 50k-row tokenised-style frame.
+    """
+    import time
+
+    N = 50_000
+    tokens_per_doc = 30
+    tokens_struct = [
+        {"token": f"t{i}", "start": i * 5, "end": i * 5 + 4}
+        for i in range(tokens_per_doc)
+    ]
+    df = pl.DataFrame(
+        {
+            "text": [f"doc {i} " * 5 for i in range(N)],
+            "TOKENS_tokens": [tokens_struct] * N,
+        }
+    )
+    node = Node(data=df.lazy(), name="bench")
+
+    start = time.perf_counter()
+    shape = node.shape
+    elapsed = time.perf_counter() - start
+
+    assert shape == (N, 2)
+    # Generous bound — typical observed time on dev hardware is < 1ms.
+    assert elapsed < 0.1, f"Node.shape took {elapsed*1000:.1f}ms; suspect materialisation regression"
