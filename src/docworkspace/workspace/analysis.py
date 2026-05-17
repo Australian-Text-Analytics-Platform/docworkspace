@@ -34,7 +34,20 @@ def graph_json(workspace: "Workspace") -> Dict[str, object]:
     edges_payload: List[Dict[str, str]] = []
 
     for node in workspace.nodes.values():
-        nodes_payload.append(node.info())
+        try:
+            nodes_payload.append(node.info())
+        except Exception as exc:
+            # Per-node fallback: one broken node (e.g. missing source file,
+            # undeserializable lazy plan) must not take down the whole graph.
+            nodes_payload.append(
+                {
+                    "id": node.id,
+                    "name": getattr(node, "name", node.id),
+                    "operation": getattr(node, "operation", "unknown"),
+                    "child_ids": [c.id for c in getattr(node, "children", [])],
+                    "error": f"{type(exc).__name__}: {exc}",
+                }
+            )
 
         for child in node.children:
             edges_payload.append({"source": node.id, "target": child.id})

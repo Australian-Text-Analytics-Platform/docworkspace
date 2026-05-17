@@ -431,6 +431,38 @@ class TestWorkspaceGraphOperations:
             for field in required_fields:
                 assert field in node_data
 
+    def test_workspace_graph_survives_broken_node_info(self):
+        """One node failing `info()` must not break the whole graph payload."""
+        workspace = Workspace("graph_resilience")
+        good_node = Node(
+            data=pl.DataFrame({"x": [1, 2, 3]}).lazy(),
+            name="good",
+            workspace=workspace,
+        )
+        bad_node = Node(
+            data=pl.DataFrame({"y": [4, 5]}).lazy(),
+            name="bad",
+            workspace=workspace,
+        )
+
+        # Simulate a broken lazy plan / missing source file: info() raises.
+        def _boom() -> dict:
+            raise RuntimeError("source parquet missing")
+
+        bad_node.info = _boom  # type: ignore[method-assign]
+
+        graph_data = workspace.graph_json()
+
+        nodes_by_id = {n["id"]: n for n in graph_data["nodes"]}
+        assert good_node.id in nodes_by_id
+        assert bad_node.id in nodes_by_id
+        # Healthy node still carries its real info.
+        assert "shape" in nodes_by_id[good_node.id]
+        # Broken node carries an error envelope plus identity fields.
+        assert nodes_by_id[bad_node.id]["name"] == "bad"
+        assert "error" in nodes_by_id[bad_node.id]
+        assert "RuntimeError" in nodes_by_id[bad_node.id]["error"]
+
     def test_workspace_with_initial_data_loading(self):
         """Test explicit initial data loading after creating an empty workspace."""
         # Test with DataFrame converted to LazyFrame before creating a Node.
