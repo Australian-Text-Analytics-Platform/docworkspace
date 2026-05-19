@@ -112,20 +112,77 @@ class Node:
                 if not isinstance(result, pl.LazyFrame):
                     return result
 
-                child = Node(
+                return self._child_node(
                     data=result,
                     name=f"{item}_{self.name}",
-                    workspace=self.workspace,
-                    parents=[self],
                     operation=item,
-                    derived=self.derived,
+                    document=self.document,
                 )
-                if self.document:
-                    child.document = self.document
-                return child
 
             return wrapper
         return attr
+
+    def _child_node(
+        self,
+        *,
+        data: pl.LazyFrame,
+        name: str,
+        operation: str,
+        parents: Sequence["Node | str"] = (),
+        derived: Mapping[str, DerivedColumnMeta] | None = None,
+        document: str | None = None,
+    ) -> "Node":
+        child = Node(
+            data=data,
+            name=name,
+            workspace=self.workspace,
+            parents=parents or [self],
+            operation=operation,
+            derived=self.derived if derived is None else derived,
+        )
+        if document is not None:
+            child.document = document
+        return child
+
+    @staticmethod
+    def _derived_for_columns(
+        derived: Mapping[str, DerivedColumnMeta], columns: set[str]
+    ) -> dict[str, DerivedColumnMeta]:
+        return {name: meta for name, meta in derived.items() if name in columns}
+
+    @classmethod
+    def _drop_derived_from_stale_sources(
+        cls,
+        data: pl.LazyFrame,
+        derived: Mapping[str, DerivedColumnMeta],
+        stale_sources: set[str],
+    ) -> tuple[pl.LazyFrame, dict[str, DerivedColumnMeta]]:
+        current_columns = set(data.collect_schema().names())
+        retained = cls._derived_for_columns(derived, current_columns)
+        if not stale_sources:
+            return data, retained
+
+        cascade_targets = [
+            name
+            for name, meta in retained.items()
+            if meta["source_column"] in stale_sources
+        ]
+        for name in cascade_targets:
+            retained.pop(name, None)
+
+        if cascade_targets:
+            data = data.drop(*cascade_targets, strict=False)
+        return data, retained
+
+    @staticmethod
+    def _mapped_document_column(document: str, mapping: Any) -> str:
+        if isinstance(mapping, dict) and document in mapping:
+            mapped_value = mapping[document]
+        elif callable(mapping):
+            mapped_value = mapping(document)
+        else:
+            return document
+        return mapped_value if isinstance(mapped_value, str) else document
 
     # Commonly accessed convenience properties (explicit to avoid delegation surprises)
     @property
@@ -176,13 +233,10 @@ class Node:
     # ------------------------------------------------------------------
     def filter(self, *predicates: Any, **constraints: Any) -> "Node":
         result = self.data.filter(*predicates, **constraints)
-        return Node(
+        return self._child_node(
             data=result,
             name=f"filter_{self.name}",
-            workspace=self.workspace,
-            parents=[self],
             operation="filter",
-            derived=self.derived,
         )
 
     def select(self, *exprs: Any, **named_exprs: Any) -> "Node":
@@ -190,16 +244,11 @@ class Node:
         # User-driven select may drop derived columns from the schema; keep
         # only the derived metadata entries whose column still exists.
         result_columns = set(result.collect_schema().names())
-        retained_derived = {
-            name: meta for name, meta in self.derived.items() if name in result_columns
-        }
-        return Node(
+        return self._child_node(
             data=result,
             name=f"select_{self.name}",
-            workspace=self.workspace,
-            parents=[self],
             operation="select",
-            derived=retained_derived,
+            derived=self._derived_for_columns(self.derived, result_columns),
         )
 
     def join(
@@ -235,10 +284,9 @@ class Node:
                         f"Conflicting derived metadata for joined column {name!r}."
                     )
                 merged[name] = meta
-        return Node(
+        return self._child_node(
             data=result,
             name=f"join_{self.name}_{other.name}",
-            workspace=self.workspace,
             parents=[self, other],
             operation=f"join({how})",
             derived=merged,
@@ -246,13 +294,10 @@ class Node:
 
     def slice(self, offset: int, length: int | None = None) -> "Node":
         result = self.data.slice(offset, length)
-        return Node(
+        return self._child_node(
             data=result,
             name=f"slice_{self.name}",
-            workspace=self.workspace,
-            parents=[self],
             operation="slice",
-            derived=self.derived,
         )
 
     def drop(
@@ -271,35 +316,25 @@ class Node:
         before_names = set(self.data.collect_schema().names())
         result = self.data.drop(columns, *more_columns, strict=strict)
         after_names = set(result.collect_schema().names())
-        dropped_sources = before_names - after_names
-
-        cascade_targets: list[str] = []
-        retained_derived: dict[str, DerivedColumnMeta] = {}
-        for derived_name, meta in self.derived.items():
-            if meta["source_column"] in dropped_sources and derived_name in after_names:
-                cascade_targets.append(derived_name)
-            elif derived_name in after_names:
-                retained_derived[derived_name] = meta
-
-        if cascade_targets:
-            result = result.drop(*cascade_targets, strict=False)
-
-        child = Node(
-            data=result,
-            name=f"drop_{self.name}",
-            workspace=self.workspace,
-            parents=[self],
-            operation="drop",
-            derived=retained_derived,
+        result, retained_derived = self._drop_derived_from_stale_sources(
+            result,
+            self.derived,
+            before_names - after_names,
         )
 
-        if self.document:
-            if self.document in before_names and self.document not in after_names:
-                child.document = None
-            else:
-                child.document = self.document
+        document = None
+        if self.document and not (
+            self.document in before_names and self.document not in after_names
+        ):
+            document = self.document
 
-        return child
+        return self._child_node(
+            data=result,
+            name=f"drop_{self.name}",
+            operation="drop",
+            derived=retained_derived,
+            document=document,
+        )
 
     def rename(self, mapping: Any, *, strict: bool = True) -> "Node":
         """Rename columns in-place using Polars semantics and return this node.
@@ -311,37 +346,16 @@ class Node:
         before_names = set(self.data.collect_schema().names())
         new_data = self.data.rename(mapping, strict=strict)
         after_names = set(new_data.collect_schema().names())
-        renamed_sources = before_names - after_names
-
-        if self.derived and renamed_sources:
-            cascade_targets = [
-                derived_name
-                for derived_name, meta in self.derived.items()
-                if meta["source_column"] in renamed_sources
-                and derived_name in after_names
-            ]
-            if cascade_targets:
-                new_data = new_data.drop(*cascade_targets, strict=False)
-                for name in cascade_targets:
-                    self.derived.pop(name, None)
+        new_data, self.derived = self._drop_derived_from_stale_sources(
+            new_data,
+            self.derived,
+            before_names - after_names,
+        )
 
         self.data = new_data
 
         if self.document:
-            new_document = self.document
-            if isinstance(mapping, dict) and self.document in mapping:
-                mapped_value = mapping[self.document]
-                if isinstance(mapped_value, str):
-                    new_document = mapped_value
-            elif callable(mapping):
-                try:
-                    mapped_value = mapping(self.document)
-                    if isinstance(mapped_value, str):
-                        new_document = mapped_value
-                except Exception:
-                    # Keep original document metadata when mapping function fails.
-                    pass
-            self.document = new_document
+            self.document = self._mapped_document_column(self.document, mapping)
 
         return self
 

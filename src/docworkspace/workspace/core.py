@@ -16,7 +16,7 @@ import uuid
 from datetime import datetime
 from pathlib import Path
 from tempfile import mkdtemp
-from typing import Any, Dict, Iterator, List, Optional
+from typing import Any, Iterator
 
 import polars_text  # noqa: F401  (register text namespace side-effects)
 
@@ -28,20 +28,20 @@ class Workspace:
 
     def __init__(
         self,
-        name: Optional[str] = None,
-        workspace_id: Optional[str] = None,
-        created_at: Optional[str] = None,
-        modified_at: Optional[str] = None,
+        name: str | None = None,
+        workspace_id: str | None = None,
+        created_at: str | None = None,
+        modified_at: str | None = None,
         ws_root_dir: str | Path | None = None,
     ) -> None:
         now = datetime.now().isoformat()
 
         self.id = workspace_id or str(uuid.uuid4())
         self.name = name or f"workspace_{self.id[:8]}"
-        self.nodes: Dict[str, Node] = {}
+        self.nodes: dict[str, Node] = {}
         self.description: str = ""
-        self.created_at: Optional[str] = created_at or now
-        self.modified_at: Optional[str] = modified_at or now
+        self.created_at: str | None = created_at or now
+        self.modified_at: str | None = modified_at or now
         self.analysis: Any = None  # Placeholder for analysis storage/manager
         self.ws_root_dir = (
             Path(ws_root_dir)
@@ -167,25 +167,25 @@ class Workspace:
         return True
 
     # Lookup helpers -------------------------------------------------
-    def get_node(self, node_id: str) -> Optional[Node]:
+    def get_node(self, node_id: str) -> Node | None:
         return self.nodes.get(node_id)
 
-    def get_node_by_name(self, name: str) -> Optional[Node]:
+    def get_node_by_name(self, name: str) -> Node | None:
         for node in self.nodes.values():
             if node.name == name:
                 return node
         return None
 
-    def get_node_by_uuid(self, uuid: str) -> Optional[Node]:  # Backward compat
+    def get_node_by_uuid(self, uuid: str) -> Node | None:  # Backward compat
         return self.nodes.get(uuid)
 
-    def list_nodes(self) -> List[Node]:
+    def list_nodes(self) -> list[Node]:
         return list(self.nodes.values())
 
-    def get_root_nodes(self) -> List[Node]:
+    def get_root_nodes(self) -> list[Node]:
         return [n for n in self.nodes.values() if not n.parents]
 
-    def get_leaf_nodes(self) -> List[Node]:
+    def get_leaf_nodes(self) -> list[Node]:
         return [n for n in self.nodes.values() if not n.children]
 
     # NOTE: Advanced graph algorithms (descendants, ancestors, shortest path,
@@ -222,12 +222,12 @@ class Workspace:
 
         return read_workspace(path)
 
-    def info_json(self) -> Dict[str, Any]:  # pragma: no cover
+    def info_json(self) -> dict[str, Any]:  # pragma: no cover
         from .analysis import info_json
 
         return info_json(self)
 
-    def graph_json(self) -> Dict[str, Any]:  # pragma: no cover
+    def graph_json(self) -> dict[str, Any]:  # pragma: no cover
         from .analysis import graph_json
 
         return graph_json(self)
