@@ -14,6 +14,7 @@ from typing import (
     Dict,
     Literal,
     Mapping,
+    NotRequired,
     Optional,
     Sequence,
     TypedDict,
@@ -41,6 +42,7 @@ class DerivedColumnMeta(TypedDict):
     model: str
     language: Optional[str]
     generated_at: str
+    cache_filename: NotRequired[str]
 
 
 class Node:
@@ -79,9 +81,10 @@ class Node:
         # LazyFrame schema (e.g. "__derived__.tokens.text.jieba"); values
         # carry source_column / form / model / language / generated_at.
         # Empty dict on legacy nodes is fully backward compatible.
-        self.derived: dict[str, DerivedColumnMeta] = (
-            {k: dict(v) for k, v in derived.items()} if derived else {}
-        )  # type: ignore[assignment]
+        self.derived = cast(
+            dict[str, DerivedColumnMeta],
+            {k: dict(v) for k, v in derived.items()} if derived else {},
+        )
         self.parents: list[Node | str] = list(parents)
         self.workspace: Optional[Workspace] = workspace
         self.operation = operation
@@ -99,12 +102,16 @@ class Node:
 
     def __getattr__(self, item: str) -> Any:  # pragma: no cover - thin wrapper
         # Delegate attribute access to underlying data object. Callable
-        # results are assumed to be LazyFrame and wrapped as Node.
+        # LazyFrame results are wrapped as graph child nodes; scalar/schema
+        # results are returned unchanged.
         attr = getattr(self.data, item)
         if callable(attr):
 
             def wrapper(*args, **kwargs):
-                result: pl.LazyFrame = attr(*args, **kwargs)
+                result = attr(*args, **kwargs)
+                if not isinstance(result, pl.LazyFrame):
+                    return result
+
                 child = Node(
                     data=result,
                     name=f"{item}_{self.name}",
@@ -213,13 +220,21 @@ class Node:
     ) -> "Node":
         result = self.data.join(other.data, on=on, how=how, **kwargs)
         # Union derived metadata from both sides; result column set may drop
-        # entries if join columns collide, so filter to the resulting schema.
+        # entries if join columns collide. Conflicting metadata for the same
+        # retained derived column is ambiguous, so reject it instead of letting
+        # the right side overwrite the left side silently.
         result_columns = set(result.collect_schema().names())
         merged: dict[str, DerivedColumnMeta] = {}
         for source in (self.derived, other.derived):
             for name, meta in source.items():
-                if name in result_columns:
-                    merged[name] = meta
+                if name not in result_columns:
+                    continue
+                existing = merged.get(name)
+                if existing is not None and existing != meta:
+                    raise ValueError(
+                        f"Conflicting derived metadata for joined column {name!r}."
+                    )
+                merged[name] = meta
         return Node(
             data=result,
             name=f"join_{self.name}_{other.name}",

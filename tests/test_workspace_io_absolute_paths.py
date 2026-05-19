@@ -9,7 +9,7 @@ from typing import cast
 import polars as pl
 from polars_text import list_source_paths
 
-from docworkspace.node import Node
+from docworkspace.node import DerivedColumnMeta, Node
 from docworkspace.workspace import Workspace
 from docworkspace.workspace.io import rebase_workspace_sources
 
@@ -182,7 +182,7 @@ def test_rebase_preserves_tokenized_node_after_move(tmp_path: Path):
     # Synthesize a derived tokens column on top via with_columns (LazyFrame
     # plan; represents what worker_tasks_tokenize will produce in Phase 2.3).
     derived_name = "__derived__.tokens.text.jieba"
-    derived_meta = {
+    derived_meta: DerivedColumnMeta = {
         "source_column": "text",
         "form": "tokens",
         "model": "jieba",

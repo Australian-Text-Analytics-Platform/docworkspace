@@ -221,6 +221,93 @@ class TestNode:
         assert head_node.data.collect().height == 2
         assert head_node.parents[0] == node
 
+    def test_node_delegation_returns_raw_non_lazyframe_results(self, sample_df):
+        """Delegated methods that do not return LazyFrame stay unwrapped."""
+        node = Node(sample_df.lazy(), "test_node")
+
+        schema = node.collect_schema()
+
+        assert isinstance(schema, pl.Schema)
+        assert schema.names() == list(sample_df.columns)
+
+    def test_node_join_rejects_conflicting_derived_metadata(self):
+        """Joining nodes must not silently overwrite derived metadata."""
+        derived_name = "__derived__.tokens.text.jieba"
+        left_meta = {
+            "source_column": "text",
+            "form": "tokens",
+            "model": "jieba",
+            "language": "zh",
+            "generated_at": "2026-05-12T00:00:00+00:00",
+        }
+        right_meta = {
+            **left_meta,
+            "model": "bert-base-uncased",
+            "language": "en",
+        }
+        left = Node(
+            pl.DataFrame(
+                {
+                    "key": [1],
+                    "text": ["左"],
+                    derived_name: [[{"token": "左", "start": 0, "end": 1}]],
+                }
+            ).lazy(),
+            "left",
+            derived={derived_name: left_meta},  # type: ignore[arg-type]
+        )
+        right = Node(
+            pl.DataFrame(
+                {
+                    "key": [1],
+                    "other": ["right"],
+                    derived_name: [[{"token": "right", "start": 0, "end": 5}]],
+                }
+            ).lazy(),
+            "right",
+            derived={derived_name: right_meta},  # type: ignore[arg-type]
+        )
+
+        with pytest.raises(ValueError, match="Conflicting derived metadata"):
+            left.join(right, on="key")
+
+    def test_node_join_keeps_identical_derived_metadata(self):
+        """Duplicate derived metadata is safe when both sides agree."""
+        derived_name = "__derived__.tokens.text.jieba"
+        meta = {
+            "source_column": "text",
+            "form": "tokens",
+            "model": "jieba",
+            "language": "zh",
+            "generated_at": "2026-05-12T00:00:00+00:00",
+        }
+        left = Node(
+            pl.DataFrame(
+                {
+                    "key": [1],
+                    "text": ["左"],
+                    derived_name: [[{"token": "左", "start": 0, "end": 1}]],
+                }
+            ).lazy(),
+            "left",
+            derived={derived_name: meta},  # type: ignore[arg-type]
+        )
+        right = Node(
+            pl.DataFrame(
+                {
+                    "key": [1],
+                    "other": ["right"],
+                    derived_name: [[{"token": "左", "start": 0, "end": 1}]],
+                }
+            ).lazy(),
+            "right",
+            derived={derived_name: meta},  # type: ignore[arg-type]
+        )
+
+        joined = left.join(right, on="key")
+
+        assert joined.derived == {derived_name: meta}
+
     def test_node_info(self, sample_df):
         """Test node info method returns JSON-safe dict."""
         workspace = Workspace("test_workspace")
