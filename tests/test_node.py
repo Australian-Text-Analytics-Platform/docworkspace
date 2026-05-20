@@ -1,7 +1,7 @@
 """Tests for the Node class."""
 
 from inspect import signature
-from typing import Mapping, Optional, Sequence, cast, get_type_hints
+from typing import Mapping, Sequence, cast, get_type_hints
 
 import polars as pl
 import pytest
@@ -62,7 +62,6 @@ class TestNode:
                 "Node": Node,
                 "Workspace": Workspace,
                 "Sequence": Sequence,
-                "Optional": Optional,
                 "Mapping": Mapping,
                 "DerivedColumnMeta": DerivedColumnMeta,
                 "pl": pl,
@@ -521,4 +520,6 @@ def test_node_shape_does_not_materialise_list_columns():
 
     assert shape == (N, 2)
     # Generous bound — typical observed time on dev hardware is < 1ms.
-    assert elapsed < 0.1, f"Node.shape took {elapsed*1000:.1f}ms; suspect materialisation regression"
+    assert elapsed < 0.1, (
+        f"Node.shape took {elapsed * 1000:.1f}ms; suspect materialisation regression"
+    )

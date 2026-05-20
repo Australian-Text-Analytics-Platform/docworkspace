@@ -6,13 +6,13 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any, Dict, List
+from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:  # pragma: no cover
     from .core import Workspace
 
 
-def info_json(workspace: "Workspace") -> Dict[str, Any]:
+def info_json(workspace: "Workspace") -> dict[str, Any]:
     total_nodes = len(workspace.nodes)
     root_nodes = len(workspace.get_root_nodes())
     leaf_nodes = len(workspace.get_leaf_nodes())
@@ -29,9 +29,9 @@ def info_json(workspace: "Workspace") -> Dict[str, Any]:
     }
 
 
-def graph_json(workspace: "Workspace") -> Dict[str, object]:
-    nodes_payload: List[Dict[str, object]] = []
-    edges_payload: List[Dict[str, str]] = []
+def graph_json(workspace: "Workspace") -> dict[str, object]:
+    nodes_payload: list[dict[str, object]] = []
+    edges_payload: list[dict[str, str]] = []
 
     for node in workspace.nodes.values():
         try:

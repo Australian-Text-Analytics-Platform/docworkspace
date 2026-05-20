@@ -11,11 +11,9 @@ from pathlib import Path
 from typing import (
     TYPE_CHECKING,
     Any,
-    Dict,
     Literal,
     Mapping,
     NotRequired,
-    Optional,
     Sequence,
     TypedDict,
     cast,
@@ -40,7 +38,7 @@ class DerivedColumnMeta(TypedDict):
     source_column: str
     form: str
     model: str
-    language: Optional[str]
+    language: str | None
     generated_at: str
     cache_filename: NotRequired[str]
 
@@ -57,12 +55,12 @@ class Node:
         self,
         data: pl.LazyFrame,
         name: str,
-        workspace: Optional["Workspace"] = None,
+        workspace: Workspace | None = None,
         parents: Sequence["Node | str"] = (),
         operation: str | None = None,
         id: str | None = None,
         document: str | None = None,
-        derived: Optional[Mapping[str, DerivedColumnMeta]] = None,
+        derived: Mapping[str, DerivedColumnMeta] | None = None,
     ) -> None:
         self.id = id or str(uuid.uuid4())
         self.name = name or f"node_{self.id[:8]}"
@@ -75,7 +73,7 @@ class Node:
         self._undo_stack: list[pl.LazyFrame] = []
         self._redo_stack: list[pl.LazyFrame] = []
         self._data: pl.LazyFrame = data
-        self._document_column: Optional[str] = document
+        self._document_column: str | None = document
         # Per-column metadata for hidden derived analytic columns (Phase 2,
         # decision 7). Keys are the derived column names that exist in the
         # LazyFrame schema (e.g. "__derived__.tokens.text.jieba"); values
@@ -86,7 +84,7 @@ class Node:
             {k: dict(v) for k, v in derived.items()} if derived else {},
         )
         self.parents: list[Node | str] = list(parents)
-        self.workspace: Optional[Workspace] = workspace
+        self.workspace: Workspace | None = workspace
         self.operation = operation
 
         if self.workspace is not None and self.id not in self.workspace.nodes:
@@ -381,11 +379,11 @@ class Node:
     # Properties
     # ------------------------------------------------------------------
     @property
-    def document(self) -> Optional[str]:
+    def document(self) -> str | None:
         return self._document_column
 
     @document.setter
-    def document(self, value: Optional[str]) -> None:
+    def document(self, value: str | None) -> None:
         self._document_column = value
 
     @property
@@ -442,7 +440,7 @@ class Node:
     # ------------------------------------------------------------------
     # Schema utilities
     # ------------------------------------------------------------------
-    def json_schema(self) -> Dict[str, str]:
+    def json_schema(self) -> dict[str, str]:
         """Return raw schema - JSON conversion should be handled by API layer."""
         schema = self.data.collect_schema()
         return {col: str(dtype) for col, dtype in schema.items()} if schema else {}
@@ -450,7 +448,7 @@ class Node:
     # ------------------------------------------------------------------
     # Info
     # ------------------------------------------------------------------
-    def info(self) -> Dict[str, Any]:
+    def info(self) -> dict[str, Any]:
         """Get JSON-safe node information suitable for API responses.
 
         All values are plain Python types (str, int, list, dict, None)
@@ -473,7 +471,7 @@ class Node:
             "can_redo": self.can_redo,
         }
 
-    def to_dict(self, *, base_dir: str | Path | None = None) -> Dict[str, Any]:
+    def to_dict(self, *, base_dir: str | Path | None = None) -> dict[str, Any]:
         from .io import to_dict
 
         return to_dict(self, base_dir=base_dir)
@@ -481,9 +479,9 @@ class Node:
     @classmethod
     def from_dict(
         cls,
-        payload: Dict[str, Any],
+        payload: dict[str, Any],
         *,
-        workspace: Optional["Workspace"] = None,
+        workspace: Workspace | None = None,
         base_dir: str | Path | None = None,
     ) -> "Node":
         from .io import from_dict

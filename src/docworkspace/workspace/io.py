@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Dict, Iterable, Union
+from typing import TYPE_CHECKING, Any, Iterable
 
 from polars_text import list_source_paths, replace_source_paths
 
@@ -102,7 +102,7 @@ def _garbage_collect_workspace_data(
                 candidate.unlink(missing_ok=True)
 
 
-def write_workspace(workspace: "Workspace", path: Union[str, Path]) -> None:
+def write_workspace(workspace: "Workspace", path: str | Path) -> None:
     target = _resolve_metadata_path(Path(path))
     target.parent.mkdir(parents=True, exist_ok=True)
     workspace.ws_root_dir = target.parent
@@ -115,7 +115,7 @@ def write_workspace(workspace: "Workspace", path: Union[str, Path]) -> None:
     for node in workspace.nodes.values():
         nodes_data.append(node_to_dict(node))
 
-    workspace_metadata: Dict[str, Any] = {
+    workspace_metadata: dict[str, Any] = {
         "id": workspace.id,
         "name": workspace.name,
         "version": 2,
@@ -131,7 +131,7 @@ def write_workspace(workspace: "Workspace", path: Union[str, Path]) -> None:
     _garbage_collect_workspace_data(target.parent, nodes_data)
 
 
-def read_workspace_metadata(path: Union[str, Path]) -> Dict[str, Any]:
+def read_workspace_metadata(path: str | Path) -> dict[str, Any]:
     """Load and return the workspace metadata dictionary from metadata.json.
 
     This helper only reads/parses the JSON metadata file and does not attempt
@@ -143,7 +143,7 @@ def read_workspace_metadata(path: Union[str, Path]) -> Dict[str, Any]:
         return json.load(f)
 
 
-def read_workspace(path: Union[str, Path]) -> "Workspace":
+def read_workspace(path: str | Path) -> "Workspace":
     from .core import Workspace
 
     target = _resolve_metadata_path(Path(path))
@@ -165,7 +165,7 @@ def read_workspace(path: Union[str, Path]) -> "Workspace":
     return workspace
 
 
-def rebase_workspace_sources(path: Union[str, Path]) -> None:
+def rebase_workspace_sources(path: str | Path) -> None:
     """Rewrite stale scan source paths inside every plbin listed in ``metadata.json``.
 
     Call this **after** the workspace folder has reached its final location on
