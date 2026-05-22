@@ -570,7 +570,9 @@ docworkspace/
 
 ## License
 
-Part of the LDaCA (Language Data Commons of Australia) ecosystem.
+`docworkspace` is licensed under the [Apache License, Version 2.0](./LICENSE). See [NOTICE](./NOTICE) for attribution and citation.
+
+Developed by Sydney Informatics Hub, The University of Sydney, for the Language Data Commons of Australia ([LDaCA](https://www.ldaca.edu.au)) — primarily as a core component of [LDaCA Wordflow](https://github.com/Australian-Text-Analytics-Platform/ldaca-wordflow), but designed to be used independently in research pipelines and Jupyter notebooks.
 
 ## Changelog
 

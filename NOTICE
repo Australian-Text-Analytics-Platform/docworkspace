@@ -1,0 +1,23 @@
+docworkspace
+Copyright 2025-2026 Language Data Commons of Australia (LDaCA)
+Copyright 2025-2026 Sydney Informatics Hub, The University of Sydney
+
+docworkspace is a lazy workspace-graph library built around `Workspace`
+and `Node`, providing parent-child node relationships and lazy Polars
+LazyFrame operations for text-analytics pipelines.
+
+Developed by Sydney Informatics Hub (SIH), The University of Sydney,
+for the Language Data Commons of Australia (LDaCA,
+https://www.ldaca.edu.au) — a national research infrastructure project
+funded by the Australian Research Data Commons (ARDC) and enabled by
+the National Collaborative Research Infrastructure Strategy (NCRIS).
+
+docworkspace is developed primarily as a core component of LDaCA
+Wordflow
+(https://github.com/Australian-Text-Analytics-Platform/ldaca-wordflow),
+but is designed to be used independently in research pipelines,
+Jupyter notebooks, and other Polars-based data workflows.
+
+If you use docworkspace in research, please cite the Language Data
+Commons of Australia (LDaCA) — see https://www.ldaca.edu.au for the
+recommended citation form.

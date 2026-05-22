@@ -1,9 +1,12 @@
 [project]
 name = "docworkspace"
 version = "0.2.9"
-description = "A workspace library for managing Polars dataframes with parent-child relationships and lazy evaluation"
+description = "A workspace library for managing Polars dataframes with parent-child relationships and lazy evaluation (LDaCA Wordflow)"
 readme = "README.md"
 requires-python = ">=3.14"
+license = "Apache-2.0"
+license-files = ["LICENSE", "NOTICE"]
+authors = [{ name = "Language Data Commons of Australia (LDaCA) and Sydney Informatics Hub, The University of Sydney" }]
 # polars-text 0.1.6 enables polars-plan's `nightly` Cargo feature, which is
 # required to deserialize plans containing `.str.to_titlecase()` (and other
 # nightly-gated DslPlan variants) emitted by Python polars wheels. Older
