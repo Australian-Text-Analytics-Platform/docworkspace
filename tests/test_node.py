@@ -97,6 +97,25 @@ class TestNode:
         assert filtered.workspace == workspace
         assert filtered.id in workspace.nodes
 
+    def test_node_select_creates_child_with_selected_schema(self):
+        """Selecting columns should create a child node in the same workspace."""
+        workspace = Workspace("select_test")
+        node = Node(
+            pl.DataFrame(
+                {"id": [1, 2, 3], "name": ["a", "b", "c"], "value": [10, 20, 30]}
+            ).lazy(),
+            "original",
+            workspace,
+        )
+
+        selected = node.select(["id", "name"])
+
+        assert selected is not node
+        assert selected.workspace == workspace
+        assert selected.parents == [node]
+        assert selected in node.children
+        assert selected.data.collect_schema().names() == ["id", "name"]
+
     def test_node_slice(self, sample_df):
         """Test slicing a Node."""
         node = Node(sample_df.lazy(), "test_node")
@@ -232,14 +251,14 @@ class TestNode:
     def test_node_join_rejects_conflicting_derived_metadata(self):
         """Joining nodes must not silently overwrite derived metadata."""
         derived_name = "__derived__.tokens.text.jieba"
-        left_meta = {
+        left_meta: DerivedColumnMeta = {
             "source_column": "text",
             "form": "tokens",
             "model": "jieba",
             "language": "zh",
             "generated_at": "2026-05-12T00:00:00+00:00",
         }
-        right_meta = {
+        right_meta: DerivedColumnMeta = {
             **left_meta,
             "model": "bert-base-uncased",
             "language": "en",
@@ -253,7 +272,7 @@ class TestNode:
                 }
             ).lazy(),
             "left",
-            derived={derived_name: left_meta},  # type: ignore[arg-type]
+            derived={derived_name: left_meta},
         )
         right = Node(
             pl.DataFrame(
@@ -264,7 +283,7 @@ class TestNode:
                 }
             ).lazy(),
             "right",
-            derived={derived_name: right_meta},  # type: ignore[arg-type]
+            derived={derived_name: right_meta},
         )
 
         with pytest.raises(ValueError, match="Conflicting derived metadata"):
@@ -273,7 +292,7 @@ class TestNode:
     def test_node_join_keeps_identical_derived_metadata(self):
         """Duplicate derived metadata is safe when both sides agree."""
         derived_name = "__derived__.tokens.text.jieba"
-        meta = {
+        meta: DerivedColumnMeta = {
             "source_column": "text",
             "form": "tokens",
             "model": "jieba",
@@ -289,7 +308,7 @@ class TestNode:
                 }
             ).lazy(),
             "left",
-            derived={derived_name: meta},  # type: ignore[arg-type]
+            derived={derived_name: meta},
         )
         right = Node(
             pl.DataFrame(
@@ -300,7 +319,7 @@ class TestNode:
                 }
             ).lazy(),
             "right",
-            derived={derived_name: meta},  # type: ignore[arg-type]
+            derived={derived_name: meta},
         )
 
         joined = left.join(right, on="key")
@@ -486,7 +505,6 @@ class TestNodeRelationships:
         assert parent1 in merged.parents
         assert parent2 in merged.parents
         assert merged in parent1.children
-        assert merged in parent2.children
         assert merged in parent2.children
 
 

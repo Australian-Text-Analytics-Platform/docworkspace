@@ -406,7 +406,7 @@ class Node:
         node's LazyFrame schema (typically after a ``with_columns(...)`` that
         adds it). This method only writes the metadata index.
         """
-        self.derived[column_name] = dict(meta)  # type: ignore[assignment]
+        self.derived[column_name] = cast(DerivedColumnMeta, dict(meta))
 
     def unregister_derived_column(self, column_name: str) -> bool:
         """Remove the metadata entry for ``column_name``. Does not touch the

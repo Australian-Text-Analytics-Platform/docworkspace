@@ -4,9 +4,9 @@ from pathlib import Path
 from typing import cast
 
 import polars as pl
-
-from docworkspace import Node, Workspace
 from docworkspace.node.io import dumps, from_dict, loads, to_dict
+
+from docworkspace import DerivedColumnMeta, Node, Workspace
 
 
 def test_node_to_dict_persists_lazyframe_payload(tmp_path: Path):
@@ -233,7 +233,6 @@ def test_node_from_dict_ignores_missing_parent_ids(tmp_path: Path):
     )
 
     assert restored.parents == []
-    assert restored.parents == []
 
 
 def test_node_derived_metadata_round_trip(tmp_path: Path):
@@ -241,7 +240,7 @@ def test_node_derived_metadata_round_trip(tmp_path: Path):
     workspace = Workspace("node_io_derived")
     workspace.ws_root_dir = tmp_path
     derived_name = "__derived__.tokens.text.jieba"
-    meta = {
+    meta: DerivedColumnMeta = {
         "source_column": "text",
         "form": "tokens",
         "model": "jieba",
@@ -254,7 +253,7 @@ def test_node_derived_metadata_round_trip(tmp_path: Path):
             name="zh_root",
             workspace=workspace,
             operation="source",
-            derived={derived_name: meta},  # type: ignore[arg-type]
+            derived={derived_name: meta},
         )
     )
     node.document = "text"
@@ -306,7 +305,7 @@ def test_node_derived_propagates_through_getattr(tmp_path: Path):
     workspace = Workspace("derive_propagate")
     workspace.ws_root_dir = tmp_path
     derived_name = "__derived__.tokens.text.jieba"
-    meta = {
+    meta: DerivedColumnMeta = {
         "source_column": "text",
         "form": "tokens",
         "model": "jieba",
@@ -319,7 +318,7 @@ def test_node_derived_propagates_through_getattr(tmp_path: Path):
             name="zh_parent",
             workspace=workspace,
             operation="source",
-            derived={derived_name: meta},  # type: ignore[arg-type]
+            derived={derived_name: meta},
         )
     )
     parent.document = "text"
@@ -342,7 +341,7 @@ def test_node_drop_cascades_derived_columns(tmp_path: Path):
             ],
         }
     ).lazy()
-    meta = {
+    meta: DerivedColumnMeta = {
         "source_column": "text",
         "form": "tokens",
         "model": "jieba",
@@ -354,7 +353,7 @@ def test_node_drop_cascades_derived_columns(tmp_path: Path):
             data=parent_lf,
             name="parent",
             workspace=workspace,
-            derived={"__derived__.tokens.text.jieba": meta},  # type: ignore[arg-type]
+            derived={"__derived__.tokens.text.jieba": meta},
         )
     )
 
@@ -385,7 +384,7 @@ def test_node_rename_cascades_derived_columns(tmp_path: Path):
             ],
         }
     ).lazy()
-    meta = {
+    meta: DerivedColumnMeta = {
         "source_column": "text",
         "form": "tokens",
         "model": "jieba",
@@ -397,7 +396,7 @@ def test_node_rename_cascades_derived_columns(tmp_path: Path):
             data=parent_lf,
             name="rename_target",
             workspace=workspace,
-            derived={"__derived__.tokens.text.jieba": meta},  # type: ignore[arg-type]
+            derived={"__derived__.tokens.text.jieba": meta},
         )
     )
 
