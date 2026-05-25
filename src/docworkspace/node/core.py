@@ -26,13 +26,13 @@ if TYPE_CHECKING:  # pragma: no cover
 
 
 class DerivedColumnMeta(TypedDict):
-    """Metadata for a hidden derived analytic column (Phase 2, decision 7).
+    """Metadata for a derived analytic spec (Phase 2, decision 7).
 
-    Derived columns live alongside the user's columns in the same LazyFrame
-    but are stripped from frontend-facing schema projections. ``source_column``
-    points at the originating user column; ``form`` says what kind of derivation
-    (``"tokens"``, future: ``"pos"``, ``"ner"``); ``model`` identifies the
-    backend that produced it (``"jieba"``, ``"bert-base-uncased"``, ...).
+    ``source_column`` points at the originating user column; ``form`` says what
+    kind of derivation (``"tokens"``, future: ``"pos"``, ``"ner"``); ``model``
+    identifies the backend that produced it. The physical derived column may be
+    stored in the LazyFrame for legacy workspaces or hydrated temporarily from a
+    cache backend for current token specs.
     """
 
     source_column: str
@@ -41,6 +41,9 @@ class DerivedColumnMeta(TypedDict):
     language: str | None
     generated_at: str
     cache_filename: NotRequired[str]
+    cache_backend: NotRequired[str]
+    cache_schema_version: NotRequired[int]
+    params: NotRequired[dict[str, Any]]
 
 
 class Node:
@@ -74,10 +77,10 @@ class Node:
         self._redo_stack: list[pl.LazyFrame] = []
         self._data: pl.LazyFrame = data
         self._document_column: str | None = document
-        # Per-column metadata for hidden derived analytic columns (Phase 2,
-        # decision 7). Keys are the derived column names that exist in the
-        # LazyFrame schema (e.g. "__derived__.tokens.text.jieba"); values
-        # carry source_column / form / model / language / generated_at.
+        # Per-column metadata for derived analytic specs. Keys are stable
+        # derived column names (e.g. "__derived__.tokens.text.jieba"); values
+        # carry source_column / form / model / language / generated_at and
+        # cache details. The physical column may be hydrated only temporarily.
         # Empty dict on legacy nodes is fully backward compatible.
         self.derived = cast(
             dict[str, DerivedColumnMeta],
@@ -146,7 +149,11 @@ class Node:
     def _derived_for_columns(
         derived: Mapping[str, DerivedColumnMeta], columns: set[str]
     ) -> dict[str, DerivedColumnMeta]:
-        return {name: meta for name, meta in derived.items() if name in columns}
+        return {
+            name: meta
+            for name, meta in derived.items()
+            if name in columns or meta.get("source_column") in columns
+        }
 
     @classmethod
     def _drop_derived_from_stale_sources(
@@ -239,8 +246,8 @@ class Node:
 
     def select(self, *exprs: Any, **named_exprs: Any) -> "Node":
         result = self.data.select(*exprs, **named_exprs)
-        # User-driven select may drop derived columns from the schema; keep
-        # only the derived metadata entries whose column still exists.
+        # User-driven select may drop source columns; keep derived metadata
+        # only when the derived column itself or its source column survives.
         result_columns = set(result.collect_schema().names())
         return self._child_node(
             data=result,
@@ -402,9 +409,9 @@ class Node:
     ) -> None:
         """Record metadata for a hidden derived column on this node.
 
-        Caller is responsible for ensuring ``column_name`` exists in the
-        node's LazyFrame schema (typically after a ``with_columns(...)`` that
-        adds it). This method only writes the metadata index.
+        The derived column may be physical, or it may be a cache-backed spec
+        that analyses hydrate temporarily. This method only writes the metadata
+        index.
         """
         self.derived[column_name] = cast(DerivedColumnMeta, dict(meta))
 

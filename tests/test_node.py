@@ -248,6 +248,47 @@ class TestNode:
         assert isinstance(schema, pl.Schema)
         assert schema.names() == list(sample_df.columns)
 
+    def test_node_select_preserves_metadata_only_derived_specs(self):
+        """Selecting the source column keeps cache-backed token metadata."""
+        derived_name = "__derived__.tokens.text.jieba"
+        meta: DerivedColumnMeta = {
+            "source_column": "text",
+            "form": "tokens",
+            "model": "jieba",
+            "language": "zh",
+            "generated_at": "2026-05-12T00:00:00+00:00",
+        }
+        node = Node(
+            pl.DataFrame({"text": ["左"], "other": [1]}).lazy(),
+            "source",
+            derived={derived_name: meta},
+        )
+
+        selected = node.select("text")
+
+        assert selected.derived == {derived_name: meta}
+        assert derived_name not in selected.data.collect_schema().names()
+
+    def test_node_select_drops_metadata_only_derived_specs_without_source(self):
+        """Selecting away the source column invalidates token metadata."""
+        derived_name = "__derived__.tokens.text.jieba"
+        meta: DerivedColumnMeta = {
+            "source_column": "text",
+            "form": "tokens",
+            "model": "jieba",
+            "language": "zh",
+            "generated_at": "2026-05-12T00:00:00+00:00",
+        }
+        node = Node(
+            pl.DataFrame({"text": ["左"], "other": [1]}).lazy(),
+            "source",
+            derived={derived_name: meta},
+        )
+
+        selected = node.select("other")
+
+        assert selected.derived == {}
+
     def test_node_join_rejects_conflicting_derived_metadata(self):
         """Joining nodes must not silently overwrite derived metadata."""
         derived_name = "__derived__.tokens.text.jieba"
