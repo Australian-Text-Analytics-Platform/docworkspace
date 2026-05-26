@@ -5,7 +5,7 @@
 The test suite covers:
 
 - node construction, LazyFrame enforcement, delegation, filter/slice/join/drop,
-  rename, undo/redo, and derived metadata behavior;
+  rename, undo/redo, and tokenization metadata behavior;
 - workspace add/remove, parent resolution, serialization round trips, and JSON
   summaries;
 - workspace path rebasing after folder moves and renames;

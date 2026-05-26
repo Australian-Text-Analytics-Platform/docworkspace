@@ -25,18 +25,11 @@ if TYPE_CHECKING:  # pragma: no cover
     from ..workspace.core import Workspace  # pragma: no cover
 
 
-class DerivedColumnMeta(TypedDict):
-    """Metadata for a derived analytic spec (Phase 2, decision 7).
-
-    ``source_column`` points at the originating user column; ``form`` says what
-    kind of derivation (``"tokens"``, future: ``"pos"``, ``"ner"``); ``model``
-    identifies the backend that produced it. The physical derived column may be
-    stored in the LazyFrame for legacy workspaces or hydrated temporarily from a
-    cache backend for current token specs.
-    """
+class TokenizationMeta(TypedDict):
+    """Metadata for one source column's tokenization spec."""
 
     source_column: str
-    form: str
+    column_name: str
     model: str
     language: str | None
     generated_at: str
@@ -63,7 +56,7 @@ class Node:
         operation: str | None = None,
         id: str | None = None,
         document: str | None = None,
-        derived: Mapping[str, DerivedColumnMeta] | None = None,
+        tokenization: Mapping[str, TokenizationMeta] | None = None,
     ) -> None:
         self.id = id or str(uuid.uuid4())
         self.name = name or f"node_{self.id[:8]}"
@@ -77,14 +70,9 @@ class Node:
         self._redo_stack: list[pl.LazyFrame] = []
         self._data: pl.LazyFrame = data
         self._document_column: str | None = document
-        # Per-column metadata for derived analytic specs. Keys are stable
-        # derived column names (e.g. "__derived__.tokens.text.jieba"); values
-        # carry source_column / form / model / language / generated_at and
-        # cache details. The physical column may be hydrated only temporarily.
-        # Empty dict on legacy nodes is fully backward compatible.
-        self.derived = cast(
-            dict[str, DerivedColumnMeta],
-            {k: dict(v) for k, v in derived.items()} if derived else {},
+        self.tokenization = cast(
+            dict[str, TokenizationMeta],
+            {k: dict(v) for k, v in tokenization.items()} if tokenization else {},
         )
         self.parents: list[Node | str] = list(parents)
         self.workspace: Workspace | None = workspace
@@ -130,7 +118,7 @@ class Node:
         name: str,
         operation: str,
         parents: Sequence["Node | str"] = (),
-        derived: Mapping[str, DerivedColumnMeta] | None = None,
+        tokenization: Mapping[str, TokenizationMeta] | None = None,
         document: str | None = None,
     ) -> "Node":
         child = Node(
@@ -139,41 +127,43 @@ class Node:
             workspace=self.workspace,
             parents=parents or [self],
             operation=operation,
-            derived=self.derived if derived is None else derived,
+            tokenization=self.tokenization if tokenization is None else tokenization,
         )
         if document is not None:
             child.document = document
         return child
 
     @staticmethod
-    def _derived_for_columns(
-        derived: Mapping[str, DerivedColumnMeta], columns: set[str]
-    ) -> dict[str, DerivedColumnMeta]:
+    def _tokenization_for_columns(
+        tokenization: Mapping[str, TokenizationMeta], columns: set[str]
+    ) -> dict[str, TokenizationMeta]:
         return {
-            name: meta
-            for name, meta in derived.items()
-            if name in columns or meta.get("source_column") in columns
+            source_column: meta
+            for source_column, meta in tokenization.items()
+            if source_column in columns
+            or meta.get("source_column") in columns
+            or meta.get("column_name") in columns
         }
 
     @classmethod
-    def _drop_derived_from_stale_sources(
+    def _drop_tokenization_from_stale_sources(
         cls,
         data: pl.LazyFrame,
-        derived: Mapping[str, DerivedColumnMeta],
+        tokenization: Mapping[str, TokenizationMeta],
         stale_sources: set[str],
-    ) -> tuple[pl.LazyFrame, dict[str, DerivedColumnMeta]]:
+    ) -> tuple[pl.LazyFrame, dict[str, TokenizationMeta]]:
         current_columns = set(data.collect_schema().names())
-        retained = cls._derived_for_columns(derived, current_columns)
+        retained = cls._tokenization_for_columns(tokenization, current_columns)
         if not stale_sources:
             return data, retained
 
-        cascade_targets = [
-            name
-            for name, meta in retained.items()
-            if meta["source_column"] in stale_sources
-        ]
-        for name in cascade_targets:
-            retained.pop(name, None)
+        cascade_targets: list[str] = []
+        for source_column, meta in list(retained.items()):
+            if source_column in stale_sources or meta["source_column"] in stale_sources:
+                retained.pop(source_column, None)
+                column_name = meta.get("column_name")
+                if isinstance(column_name, str):
+                    cascade_targets.append(column_name)
 
         if cascade_targets:
             data = data.drop(*cascade_targets, strict=False)
@@ -246,14 +236,15 @@ class Node:
 
     def select(self, *exprs: Any, **named_exprs: Any) -> "Node":
         result = self.data.select(*exprs, **named_exprs)
-        # User-driven select may drop source columns; keep derived metadata
-        # only when the derived column itself or its source column survives.
         result_columns = set(result.collect_schema().names())
         return self._child_node(
             data=result,
             name=f"select_{self.name}",
             operation="select",
-            derived=self._derived_for_columns(self.derived, result_columns),
+            tokenization=self._tokenization_for_columns(
+                self.tokenization,
+                result_columns,
+            ),
         )
 
     def join(
@@ -273,28 +264,27 @@ class Node:
         **kwargs: Any,
     ) -> "Node":
         result = self.data.join(other.data, on=on, how=how, **kwargs)
-        # Union derived metadata from both sides; result column set may drop
-        # entries if join columns collide. Conflicting metadata for the same
-        # retained derived column is ambiguous, so reject it instead of letting
-        # the right side overwrite the left side silently.
         result_columns = set(result.collect_schema().names())
-        merged: dict[str, DerivedColumnMeta] = {}
-        for source in (self.derived, other.derived):
-            for name, meta in source.items():
-                if name not in result_columns:
+        merged_tokenization: dict[str, TokenizationMeta] = {}
+        for source in (self.tokenization, other.tokenization):
+            for source_column, meta in source.items():
+                if (
+                    source_column not in result_columns
+                    and meta.get("column_name") not in result_columns
+                ):
                     continue
-                existing = merged.get(name)
+                existing = merged_tokenization.get(source_column)
                 if existing is not None and existing != meta:
                     raise ValueError(
-                        f"Conflicting derived metadata for joined column {name!r}."
+                        f"Conflicting tokenization metadata for joined column {source_column!r}."
                     )
-                merged[name] = meta
+                merged_tokenization[source_column] = meta
         return self._child_node(
             data=result,
             name=f"join_{self.name}_{other.name}",
             parents=[self, other],
             operation=f"join({how})",
-            derived=merged,
+            tokenization=merged_tokenization,
         )
 
     def slice(self, offset: int, length: int | None = None) -> "Node":
@@ -314,16 +304,15 @@ class Node:
         """Drop columns using Polars semantics and return a child node.
 
         Mirrors ``polars.LazyFrame.drop`` while preserving DocWorkspace lineage.
-        Cascade rule (decision 7): when a user column is dropped, any derived
-        columns whose ``source_column`` matched are also dropped and removed
-        from ``Node.derived``.
+        Cascade rule: when a source column is dropped, tokenization metadata for
+        that source is also dropped.
         """
         before_names = set(self.data.collect_schema().names())
         result = self.data.drop(columns, *more_columns, strict=strict)
         after_names = set(result.collect_schema().names())
-        result, retained_derived = self._drop_derived_from_stale_sources(
+        result, retained_tokenization = self._drop_tokenization_from_stale_sources(
             result,
-            self.derived,
+            self.tokenization,
             before_names - after_names,
         )
 
@@ -337,23 +326,22 @@ class Node:
             data=result,
             name=f"drop_{self.name}",
             operation="drop",
-            derived=retained_derived,
+            tokenization=retained_tokenization,
             document=document,
         )
 
     def rename(self, mapping: Any, *, strict: bool = True) -> "Node":
         """Rename columns in-place using Polars semantics and return this node.
 
-        Cascade rule (decision 7): renaming a source column makes any derived
-        columns referencing it stale — they are dropped from the LazyFrame and
-        from ``Node.derived``. Users can re-tokenise after the rename.
+        Cascade rule: renaming a source column makes its tokenization metadata
+        stale. Users can re-tokenise after the rename.
         """
         before_names = set(self.data.collect_schema().names())
         new_data = self.data.rename(mapping, strict=strict)
         after_names = set(new_data.collect_schema().names())
-        new_data, self.derived = self._drop_derived_from_stale_sources(
+        new_data, self.tokenization = self._drop_tokenization_from_stale_sources(
             new_data,
-            self.derived,
+            self.tokenization,
             before_names - after_names,
         )
 
@@ -401,48 +389,27 @@ class Node:
     def can_redo(self) -> bool:
         return len(self._redo_stack) > 0
 
-    # ------------------------------------------------------------------
-    # Derived-column metadata (Phase 2, decision 7)
-    # ------------------------------------------------------------------
-    def register_derived_column(
-        self, column_name: str, meta: DerivedColumnMeta
-    ) -> None:
-        """Record metadata for a hidden derived column on this node.
+    def register_tokenization(self, source_column: str, meta: TokenizationMeta) -> None:
+        """Record tokenization metadata keyed by source column."""
+        self.tokenization[source_column] = cast(TokenizationMeta, dict(meta))
 
-        The derived column may be physical, or it may be a cache-backed spec
-        that analyses hydrate temporarily. This method only writes the metadata
-        index.
-        """
-        self.derived[column_name] = cast(DerivedColumnMeta, dict(meta))
+    def unregister_tokenization(self, source_column: str) -> bool:
+        """Remove tokenization metadata for ``source_column``."""
+        return self.tokenization.pop(source_column, None) is not None
 
-    def unregister_derived_column(self, column_name: str) -> bool:
-        """Remove the metadata entry for ``column_name``. Does not touch the
-        LazyFrame schema. Returns True if an entry was removed.
-        """
-        return self.derived.pop(column_name, None) is not None
-
-    def find_derived_column(
+    def find_tokenization_column(
         self,
         source_column: str,
         *,
-        form: str = "tokens",
         model: str | None = None,
     ) -> str | None:
-        """Return the name of a derived column for ``source_column``, or None.
-
-        Filters by ``form`` (default ``"tokens"``); if ``model`` is given,
-        further narrows to that backend. When multiple candidates match,
-        returns the first by insertion order.
-        """
-        for name, meta in self.derived.items():
-            if meta.get("source_column") != source_column:
-                continue
-            if meta.get("form") != form:
-                continue
-            if model is not None and meta.get("model") != model:
-                continue
-            return name
-        return None
+        """Return the hydrated token column name for ``source_column``."""
+        meta = self.tokenization.get(source_column)
+        if meta is None:
+            return None
+        if model is not None and meta.get("model") != model:
+            return None
+        return meta["column_name"]
 
     # ------------------------------------------------------------------
     # Schema utilities
@@ -503,4 +470,4 @@ class Node:
         )
 
 
-__all__ = ["Node", "DerivedColumnMeta"]
+__all__ = ["Node", "TokenizationMeta"]

@@ -7,11 +7,10 @@ from pathlib import Path
 from typing import cast
 
 import polars as pl
-from polars_source_utils import list_source_paths
-
-from docworkspace.node import DerivedColumnMeta, Node
+from docworkspace.node import Node, TokenizationMeta
 from docworkspace.workspace import Workspace
 from docworkspace.workspace.io import rebase_workspace_sources
+from polars_source_utils import list_source_paths
 
 
 def _make_parquet(path: Path, df: pl.DataFrame) -> None:
@@ -179,26 +178,31 @@ def test_rebase_preserves_tokenized_node_after_move(tmp_path: Path):
     )
     ws.add_node(base_node)
 
-    # Synthesize a derived tokens column on top via with_columns (LazyFrame
-    # plan; represents what worker_tasks_tokenize will produce in Phase 2.3).
-    derived_name = "__derived__.tokens.text.jieba"
-    derived_meta: DerivedColumnMeta = {
+    # Synthesize a hydrated tokens column on top via with_columns. The metadata
+    # is cache-like and tokenization-specific, but the LazyFrame plan remains
+    # schema-agnostic for source path rebasing.
+    tokens_name = "tokenization.text.jieba"
+    tokenization_meta: TokenizationMeta = {
         "source_column": "text",
-        "form": "tokens",
+        "column_name": tokens_name,
         "model": "jieba",
         "language": "zh",
         "generated_at": "2026-05-12T00:00:00+00:00",
     }
     tokens_frame = base_node.data.with_columns(
-        pl.lit([{"token": "doc", "start": 0, "end": 3}, {"token": "one", "start": 4, "end": 7}])
-        .alias(derived_name)
+        pl.lit(
+            [
+                {"token": "doc", "start": 0, "end": 3},
+                {"token": "one", "start": 4, "end": 7},
+            ]
+        ).alias(tokens_name)
     )
     tokens_node = Node(
         data=tokens_frame,
         name="docs_tokens",
         parents=[base_node],
         operation="tokenize",
-        derived={derived_name: derived_meta},
+        tokenization={"text": tokenization_meta},
     )
     ws.add_node(tokens_node)
     ws.save(folder_a)
@@ -214,13 +218,11 @@ def test_rebase_preserves_tokenized_node_after_move(tmp_path: Path):
     # Both nodes should be back, and the tokens node's lineage + metadata
     # preserved.
     assert len(ws2.nodes) == 2
-    loaded_tokens_node = next(
-        n for n in ws2.nodes.values() if n.name == "docs_tokens"
-    )
-    assert loaded_tokens_node.derived == {derived_name: derived_meta}
+    loaded_tokens_node = next(n for n in ws2.nodes.values() if n.name == "docs_tokens")
+    assert loaded_tokens_node.tokenization == {"text": tokenization_meta}
     assert loaded_tokens_node.operation == "tokenize"
 
     # The List[Struct] column should still be loadable end-to-end.
     collected = cast(pl.DataFrame, loaded_tokens_node.data.collect())
-    assert derived_name in collected.columns
+    assert tokens_name in collected.columns
     assert collected.height == 2

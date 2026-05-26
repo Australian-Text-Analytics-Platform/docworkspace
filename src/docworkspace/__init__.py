@@ -1,11 +1,7 @@
-"""docworkspace public API exports after module split.
+"""docworkspace public API exports."""
 
-Provides backward compatibility for original imports while exposing
-serialization, analysis, and graph helpers in dedicated submodules.
-"""
-
-from .node import DerivedColumnMeta, Node  # package exposing Node
-from .workspace import Workspace  # shim -> workspace.core.Workspace
+from .node import Node, TokenizationMeta
+from .workspace import Workspace
 
 __version__ = "0.2.8"
-__all__ = ["Workspace", "Node", "DerivedColumnMeta"]
+__all__ = ["Workspace", "Node", "TokenizationMeta"]

@@ -13,7 +13,7 @@ Each node stores:
 - `workspace`, if attached,
 - `operation`, describing how it was produced,
 - `document`, the text/document column name,
-- `derived`, metadata for hidden generated columns.
+- `tokenization`, metadata for source-column tokenization specs.
 
 ## Polars Delegation
 
@@ -25,15 +25,15 @@ scalar, or other non-LazyFrame value, it is returned directly.
 Critical operations are explicit methods instead of pure delegation:
 
 - `filter()` creates a child node and preserves metadata.
-- `select()` creates a child node and prunes derived metadata to selected
+- `select()` creates a child node and prunes tokenization metadata to selected
   columns.
-- `join()` creates a two-parent child node and rejects conflicting derived
-  metadata for retained generated columns.
+- `join()` creates a two-parent child node and rejects conflicting tokenization
+  metadata for retained token columns.
 - `slice()` creates a child node.
-- `drop()` creates a child node and drops derived columns whose source user
+- `drop()` creates a child node and drops tokenization metadata whose source
   columns were removed.
 - `rename()` mutates the current node in place, maps the document column, and
-  invalidates derived columns whose source names changed.
+  invalidates tokenization metadata whose source names changed.
 
 ## Undo And Redo
 
@@ -42,15 +42,18 @@ clears the redo stack. Undo/redo only tracks in-place data replacement on that
 node; graph-producing operations create child nodes instead. The undo stack is
 capped by `MAX_UNDO_DEPTH`.
 
-## Derived Columns
+## Tokenization Metadata
 
-Derived analytical columns live in the same LazyFrame as user columns but are
-tracked in `Node.derived`. Each entry records the source user column, form,
-model, language, generated timestamp, and optional cache filename.
+Tokenization metadata is tracked in `Node.tokenization`, keyed by source column.
+Each entry records the hydrated would-be column name such as
+`tokenization.text.jieba`, the tokenizer model, language, and cache metadata.
+Token columns are cache-backed by Wordflow and may be absent from the stored
+LazyFrame until an analysis hydrates them.
 
-Derived metadata must stay synchronized with the LazyFrame schema. Selecting
-or dropping columns prunes stale metadata. Renaming a source column invalidates
-derived columns because their source reference no longer matches the data.
+Tokenization metadata must stay synchronized with the LazyFrame schema.
+Selecting or dropping columns prunes stale metadata. Renaming a source column
+invalidates tokenization metadata because its source reference no longer
+matches the data.
 
 ## Workspace
 

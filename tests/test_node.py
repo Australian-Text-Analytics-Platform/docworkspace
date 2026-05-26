@@ -6,7 +6,7 @@ from typing import Mapping, Sequence, cast, get_type_hints
 import polars as pl
 import pytest
 
-from docworkspace import DerivedColumnMeta, Node, Workspace
+from docworkspace import Node, TokenizationMeta, Workspace
 
 
 class TestNode:
@@ -63,7 +63,7 @@ class TestNode:
                 "Workspace": Workspace,
                 "Sequence": Sequence,
                 "Mapping": Mapping,
-                "DerivedColumnMeta": DerivedColumnMeta,
+                "TokenizationMeta": TokenizationMeta,
                 "pl": pl,
             },
         )
@@ -248,124 +248,174 @@ class TestNode:
         assert isinstance(schema, pl.Schema)
         assert schema.names() == list(sample_df.columns)
 
-    def test_node_select_preserves_metadata_only_derived_specs(self):
-        """Selecting the source column keeps cache-backed token metadata."""
-        derived_name = "__derived__.tokens.text.jieba"
-        meta: DerivedColumnMeta = {
+    def test_node_select_preserves_tokenization_metadata_by_source_column(self):
+        """Selecting a tokenized source column keeps its tokenization spec."""
+        meta: TokenizationMeta = {
             "source_column": "text",
-            "form": "tokens",
+            "column_name": "tokenization.text.jieba",
             "model": "jieba",
             "language": "zh",
             "generated_at": "2026-05-12T00:00:00+00:00",
+            "cache_backend": "duckdb",
+            "params": {"lowercase": False, "remove_punct": True},
         }
         node = Node(
             pl.DataFrame({"text": ["左"], "other": [1]}).lazy(),
             "source",
-            derived={derived_name: meta},
+            tokenization={"text": meta},
         )
 
         selected = node.select("text")
 
-        assert selected.derived == {derived_name: meta}
-        assert derived_name not in selected.data.collect_schema().names()
+        assert selected.tokenization == {"text": meta}
+        assert selected.find_tokenization_column("text") == "tokenization.text.jieba"
+        assert "tokenization.text.jieba" not in selected.data.collect_schema().names()
 
-    def test_node_select_drops_metadata_only_derived_specs_without_source(self):
-        """Selecting away the source column invalidates token metadata."""
-        derived_name = "__derived__.tokens.text.jieba"
-        meta: DerivedColumnMeta = {
+    def test_node_select_drops_tokenization_metadata_without_source_column(self):
+        """Selecting away a source column invalidates only that tokenization spec."""
+        text_meta: TokenizationMeta = {
             "source_column": "text",
-            "form": "tokens",
+            "column_name": "tokenization.text.jieba",
+            "model": "jieba",
+            "language": "zh",
+            "generated_at": "2026-05-12T00:00:00+00:00",
+        }
+        other_meta: TokenizationMeta = {
+            "source_column": "other",
+            "column_name": "tokenization.other.bert-base-uncased",
+            "model": "bert-base-uncased",
+            "language": "en",
+            "generated_at": "2026-05-12T00:00:00+00:00",
+        }
+        node = Node(
+            pl.DataFrame({"text": ["左"], "other": ["right"]}).lazy(),
+            "source",
+            tokenization={"text": text_meta, "other": other_meta},
+        )
+
+        selected = node.select("other")
+
+        assert selected.tokenization == {"other": other_meta}
+
+    def test_node_drop_cascades_tokenization_columns(self):
+        """Dropping a tokenized source removes metadata and hydrated column if present."""
+        meta: TokenizationMeta = {
+            "source_column": "text",
+            "column_name": "tokenization.text.jieba",
             "model": "jieba",
             "language": "zh",
             "generated_at": "2026-05-12T00:00:00+00:00",
         }
         node = Node(
-            pl.DataFrame({"text": ["左"], "other": [1]}).lazy(),
+            pl.DataFrame(
+                {
+                    "text": ["左"],
+                    "other": [1],
+                    "tokenization.text.jieba": [
+                        [{"token": "左", "start": 0, "end": 1}]
+                    ],
+                }
+            ).lazy(),
             "source",
-            derived={derived_name: meta},
+            tokenization={"text": meta},
         )
 
-        selected = node.select("other")
+        survivor = node.drop("other")
+        assert survivor.tokenization == {"text": meta}
 
-        assert selected.derived == {}
+        cascaded = node.drop("text")
+        assert cascaded.tokenization == {}
+        assert "tokenization.text.jieba" not in cascaded.data.collect_schema().names()
 
-    def test_node_join_rejects_conflicting_derived_metadata(self):
-        """Joining nodes must not silently overwrite derived metadata."""
-        derived_name = "__derived__.tokens.text.jieba"
-        left_meta: DerivedColumnMeta = {
+    def test_node_rename_cascades_tokenization_columns(self):
+        """Renaming a tokenized source removes stale tokenization metadata."""
+        meta: TokenizationMeta = {
             "source_column": "text",
-            "form": "tokens",
+            "column_name": "tokenization.text.jieba",
             "model": "jieba",
             "language": "zh",
             "generated_at": "2026-05-12T00:00:00+00:00",
         }
-        right_meta: DerivedColumnMeta = {
-            **left_meta,
+        node = Node(
+            pl.DataFrame(
+                {
+                    "text": ["左"],
+                    "tokenization.text.jieba": [
+                        [{"token": "左", "start": 0, "end": 1}]
+                    ],
+                }
+            ).lazy(),
+            "source",
+            tokenization={"text": meta},
+        )
+
+        node.rename({"text": "body"})
+
+        after_names = node.data.collect_schema().names()
+        assert node.tokenization == {}
+        assert "body" in after_names
+        assert "tokenization.text.jieba" not in after_names
+
+    def test_node_join_rejects_conflicting_tokenization_metadata(self):
+        """Joining nodes must not silently overwrite tokenization specs."""
+        left_meta: TokenizationMeta = {
+            "source_column": "text",
+            "column_name": "tokenization.text.jieba",
+            "model": "jieba",
+            "language": "zh",
+            "generated_at": "2026-05-12T00:00:00+00:00",
+        }
+        right_meta: TokenizationMeta = {
+            "source_column": "text",
+            "column_name": "tokenization.text.bert-base-uncased",
             "model": "bert-base-uncased",
             "language": "en",
+            "generated_at": "2026-05-12T00:00:00+00:00",
         }
         left = Node(
-            pl.DataFrame(
-                {
-                    "key": [1],
-                    "text": ["左"],
-                    derived_name: [[{"token": "左", "start": 0, "end": 1}]],
-                }
-            ).lazy(),
+            pl.DataFrame({"key": [1], "text": ["左"]}).lazy(),
             "left",
-            derived={derived_name: left_meta},
+            tokenization={"text": left_meta},
         )
         right = Node(
-            pl.DataFrame(
-                {
-                    "key": [1],
-                    "other": ["right"],
-                    derived_name: [[{"token": "right", "start": 0, "end": 5}]],
-                }
-            ).lazy(),
+            pl.DataFrame({"key": [1], "text": ["right"]}).lazy(),
             "right",
-            derived={derived_name: right_meta},
+            tokenization={"text": right_meta},
         )
 
-        with pytest.raises(ValueError, match="Conflicting derived metadata"):
+        with pytest.raises(ValueError, match="Conflicting tokenization metadata"):
             left.join(right, on="key")
 
-    def test_node_join_keeps_identical_derived_metadata(self):
-        """Duplicate derived metadata is safe when both sides agree."""
-        derived_name = "__derived__.tokens.text.jieba"
-        meta: DerivedColumnMeta = {
+    def test_node_join_merges_distinct_tokenization_metadata(self):
+        """Joining distinct tokenized source columns preserves both specs."""
+        text_meta: TokenizationMeta = {
             "source_column": "text",
-            "form": "tokens",
+            "column_name": "tokenization.text.jieba",
             "model": "jieba",
             "language": "zh",
             "generated_at": "2026-05-12T00:00:00+00:00",
         }
+        other_meta: TokenizationMeta = {
+            "source_column": "other",
+            "column_name": "tokenization.other.bert-base-uncased",
+            "model": "bert-base-uncased",
+            "language": "en",
+            "generated_at": "2026-05-12T00:00:00+00:00",
+        }
         left = Node(
-            pl.DataFrame(
-                {
-                    "key": [1],
-                    "text": ["左"],
-                    derived_name: [[{"token": "左", "start": 0, "end": 1}]],
-                }
-            ).lazy(),
+            pl.DataFrame({"key": [1], "text": ["左"]}).lazy(),
             "left",
-            derived={derived_name: meta},
+            tokenization={"text": text_meta},
         )
         right = Node(
-            pl.DataFrame(
-                {
-                    "key": [1],
-                    "other": ["right"],
-                    derived_name: [[{"token": "左", "start": 0, "end": 1}]],
-                }
-            ).lazy(),
+            pl.DataFrame({"key": [1], "other": ["right"]}).lazy(),
             "right",
-            derived={derived_name: meta},
+            tokenization={"other": other_meta},
         )
 
         joined = left.join(right, on="key")
 
-        assert joined.derived == {derived_name: meta}
+        assert joined.tokenization == {"text": text_meta, "other": other_meta}
 
     def test_node_info(self, sample_df):
         """Test node info method returns JSON-safe dict."""

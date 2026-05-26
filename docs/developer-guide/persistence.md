@@ -21,7 +21,7 @@ node.data.serialize(abs_data_path, format="binary")
 ```
 
 The returned JSON metadata stores node id, name, operation, document column,
-derived metadata, parent ids, and a workspace-relative `data_path`.
+tokenization metadata, parent ids, and a workspace-relative `data_path`.
 
 `node.io.from_dict()` deserializes the `.plbin` file with Polars and recreates
 the node. If a workspace is provided, parent ids that already exist in the

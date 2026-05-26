@@ -8,13 +8,19 @@ from docworkspace import Node, Workspace
 def test_core_package_exports_only_workspace_types():
     from docworkspace import __all__
 
-    assert set(__all__) == {"Node", "Workspace", "DerivedColumnMeta"}
+    assert set(__all__) == {
+        "Node",
+        "Workspace",
+        "TokenizationMeta",
+    }
 
 
 def test_core_classes_do_not_expose_api_helpers():
     workspace = Workspace("test")
     node = workspace.add_node(
-        Node(pl.DataFrame({"id": [1, 2, 3], "text": ["a", "b", "c"]}).lazy(), "test_node")
+        Node(
+            pl.DataFrame({"id": [1, 2, 3], "text": ["a", "b", "c"]}).lazy(), "test_node"
+        )
     )
 
     api_methods = {

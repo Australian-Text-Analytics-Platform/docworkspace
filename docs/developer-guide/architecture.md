@@ -11,13 +11,13 @@ analysis feature logic. Its job is narrower:
 
 - hold nodes backed by lazy Polars plans,
 - track parent/child relationships between transformations,
-- preserve document-column and derived-column metadata,
+- preserve document-column and tokenization metadata,
 - serialize workspaces to portable folders,
 - expose simple JSON summaries and graph payloads.
 
 ## Main Modules
 
-- `src/docworkspace/node/core.py`: `Node`, derived-column metadata, Polars
+- `src/docworkspace/node/core.py`: `Node`, tokenization metadata, Polars
   delegation, explicit dataframe operations, undo/redo, and schema helpers.
 - `src/docworkspace/node/io.py`: node serialization to JSON metadata plus
   `.plbin` LazyFrame plan files.
