@@ -272,5 +272,3 @@ def test_node_tokenization_metadata_round_trip(tmp_path: Path):
         == "tokenization.text.jieba"
     )
     assert restored.find_tokenization_column("text", model="other-model") is None
-
-
