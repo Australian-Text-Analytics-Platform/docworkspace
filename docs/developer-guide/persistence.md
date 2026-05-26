@@ -49,9 +49,9 @@ folder between directories or machines can break those paths.
 
 1. read `metadata.json`,
 2. find each registered `.plbin`,
-3. ask `polars_text.list_source_paths()` for embedded scan paths,
+3. ask `polars_source_utils.list_source_paths()` for embedded scan paths,
 4. map old paths to files with the same basename in the current `data/` folder,
-5. call `polars_text.replace_source_paths()` to rewrite the plan in place.
+5. call `polars_source_utils.replace_source_paths()` to rewrite the plan in place.
 
 This avoids collecting or rewriting the underlying data.
 

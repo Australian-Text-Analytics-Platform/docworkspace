@@ -4,11 +4,9 @@ version = "0.2.8"
 description = "A workspace library for managing Polars dataframes with parent-child relationships and lazy evaluation"
 readme = "README.md"
 requires-python = ">=3.14"
-# polars-text 0.1.6 enables polars-plan's `nightly` Cargo feature, which is
-# required to deserialize plans containing `.str.to_titlecase()` (and other
-# nightly-gated DslPlan variants) emitted by Python polars wheels. Older
-# polars-text wheels fail with `unknown variant 'Titlecase'` on those plans.
-dependencies = ["polars-text>=0.1.6"]
+# polars-text registers the `.text` namespace used by workspace LazyFrames.
+# polars-source-utils owns serialized plan path inspection/rebasing.
+dependencies = ["polars-text>=0.1.6", "polars-source-utils>=0.1.0"]
 
 [build-system]
 requires = ["hatchling"]
@@ -16,3 +14,7 @@ build-backend = "hatchling.build"
 
 [dependency-groups]
 dev = ["pytest>=8.0.0"]
+
+[tool.uv.sources]
+polars-source-utils = { path = "../polars-source-utils", editable = true }
+polars-text = { path = "../polars-text", editable = true }

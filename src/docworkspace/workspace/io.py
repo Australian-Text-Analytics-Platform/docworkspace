@@ -6,7 +6,7 @@ import json
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Iterable
 
-from polars_text import list_source_paths, replace_source_paths
+from polars_source_utils import list_source_paths, replace_source_paths
 
 if TYPE_CHECKING:  # pragma: no cover
     from .core import Workspace

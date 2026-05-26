@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import cast
 
 import polars as pl
-from polars_text import list_source_paths
+from polars_source_utils import list_source_paths
 
 from docworkspace.node import DerivedColumnMeta, Node
 from docworkspace.workspace import Workspace
