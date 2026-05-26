@@ -13,7 +13,6 @@ from typing import (
     Any,
     Literal,
     Mapping,
-    NotRequired,
     Sequence,
     TypedDict,
     cast,
@@ -28,15 +27,10 @@ if TYPE_CHECKING:  # pragma: no cover
 class TokenizationMeta(TypedDict):
     """Metadata for one source column's tokenization spec."""
 
-    source_column: str
     column_name: str
     model: str
     language: str | None
-    generated_at: str
-    cache_filename: NotRequired[str]
-    cache_backend: NotRequired[str]
-    cache_schema_version: NotRequired[int]
-    params: NotRequired[dict[str, Any]]
+    params: dict[str, Any]
 
 
 class Node:
@@ -140,9 +134,7 @@ class Node:
         return {
             source_column: meta
             for source_column, meta in tokenization.items()
-            if source_column in columns
-            or meta.get("source_column") in columns
-            or meta.get("column_name") in columns
+            if source_column in columns or meta.get("column_name") in columns
         }
 
     @classmethod
@@ -159,7 +151,7 @@ class Node:
 
         cascade_targets: list[str] = []
         for source_column, meta in list(retained.items()):
-            if source_column in stale_sources or meta["source_column"] in stale_sources:
+            if source_column in stale_sources:
                 retained.pop(source_column, None)
                 column_name = meta.get("column_name")
                 if isinstance(column_name, str):

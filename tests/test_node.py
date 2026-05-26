@@ -251,12 +251,9 @@ class TestNode:
     def test_node_select_preserves_tokenization_metadata_by_source_column(self):
         """Selecting a tokenized source column keeps its tokenization spec."""
         meta: TokenizationMeta = {
-            "source_column": "text",
             "column_name": "tokenization.text.jieba",
             "model": "jieba",
             "language": "zh",
-            "generated_at": "2026-05-12T00:00:00+00:00",
-            "cache_backend": "duckdb",
             "params": {"lowercase": False, "remove_punct": True},
         }
         node = Node(
@@ -274,18 +271,16 @@ class TestNode:
     def test_node_select_drops_tokenization_metadata_without_source_column(self):
         """Selecting away a source column invalidates only that tokenization spec."""
         text_meta: TokenizationMeta = {
-            "source_column": "text",
             "column_name": "tokenization.text.jieba",
             "model": "jieba",
             "language": "zh",
-            "generated_at": "2026-05-12T00:00:00+00:00",
+            "params": {"lowercase": True, "remove_punct": True},
         }
         other_meta: TokenizationMeta = {
-            "source_column": "other",
             "column_name": "tokenization.other.bert-base-uncased",
             "model": "bert-base-uncased",
             "language": "en",
-            "generated_at": "2026-05-12T00:00:00+00:00",
+            "params": {"lowercase": True, "remove_punct": True},
         }
         node = Node(
             pl.DataFrame({"text": ["左"], "other": ["right"]}).lazy(),
@@ -300,11 +295,10 @@ class TestNode:
     def test_node_drop_cascades_tokenization_columns(self):
         """Dropping a tokenized source removes metadata and hydrated column if present."""
         meta: TokenizationMeta = {
-            "source_column": "text",
             "column_name": "tokenization.text.jieba",
             "model": "jieba",
             "language": "zh",
-            "generated_at": "2026-05-12T00:00:00+00:00",
+            "params": {"lowercase": True, "remove_punct": True},
         }
         node = Node(
             pl.DataFrame(
@@ -330,11 +324,10 @@ class TestNode:
     def test_node_rename_cascades_tokenization_columns(self):
         """Renaming a tokenized source removes stale tokenization metadata."""
         meta: TokenizationMeta = {
-            "source_column": "text",
             "column_name": "tokenization.text.jieba",
             "model": "jieba",
             "language": "zh",
-            "generated_at": "2026-05-12T00:00:00+00:00",
+            "params": {"lowercase": True, "remove_punct": True},
         }
         node = Node(
             pl.DataFrame(
@@ -359,18 +352,16 @@ class TestNode:
     def test_node_join_rejects_conflicting_tokenization_metadata(self):
         """Joining nodes must not silently overwrite tokenization specs."""
         left_meta: TokenizationMeta = {
-            "source_column": "text",
             "column_name": "tokenization.text.jieba",
             "model": "jieba",
             "language": "zh",
-            "generated_at": "2026-05-12T00:00:00+00:00",
+            "params": {"lowercase": True, "remove_punct": True},
         }
         right_meta: TokenizationMeta = {
-            "source_column": "text",
             "column_name": "tokenization.text.bert-base-uncased",
             "model": "bert-base-uncased",
             "language": "en",
-            "generated_at": "2026-05-12T00:00:00+00:00",
+            "params": {"lowercase": True, "remove_punct": True},
         }
         left = Node(
             pl.DataFrame({"key": [1], "text": ["左"]}).lazy(),
@@ -389,18 +380,16 @@ class TestNode:
     def test_node_join_merges_distinct_tokenization_metadata(self):
         """Joining distinct tokenized source columns preserves both specs."""
         text_meta: TokenizationMeta = {
-            "source_column": "text",
             "column_name": "tokenization.text.jieba",
             "model": "jieba",
             "language": "zh",
-            "generated_at": "2026-05-12T00:00:00+00:00",
+            "params": {"lowercase": True, "remove_punct": True},
         }
         other_meta: TokenizationMeta = {
-            "source_column": "other",
             "column_name": "tokenization.other.bert-base-uncased",
             "model": "bert-base-uncased",
             "language": "en",
-            "generated_at": "2026-05-12T00:00:00+00:00",
+            "params": {"lowercase": True, "remove_punct": True},
         }
         left = Node(
             pl.DataFrame({"key": [1], "text": ["左"]}).lazy(),

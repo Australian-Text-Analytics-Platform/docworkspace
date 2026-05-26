@@ -183,11 +183,10 @@ def test_rebase_preserves_tokenized_node_after_move(tmp_path: Path):
     # schema-agnostic for source path rebasing.
     tokens_name = "tokenization.text.jieba"
     tokenization_meta: TokenizationMeta = {
-        "source_column": "text",
         "column_name": tokens_name,
         "model": "jieba",
         "language": "zh",
-        "generated_at": "2026-05-12T00:00:00+00:00",
+        "params": {"lowercase": True, "remove_punct": True},
     }
     tokens_frame = base_node.data.with_columns(
         pl.lit(

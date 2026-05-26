@@ -240,12 +240,9 @@ def test_node_tokenization_metadata_round_trip(tmp_path: Path):
     workspace = Workspace("node_io_tokenization")
     workspace.ws_root_dir = tmp_path
     meta: TokenizationMeta = {
-        "source_column": "text",
         "column_name": "tokenization.text.jieba",
         "model": "jieba",
         "language": "zh",
-        "generated_at": "2026-05-12T00:00:00+00:00",
-        "cache_backend": "duckdb",
         "params": {"lowercase": False, "remove_punct": True},
     }
     node = workspace.add_node(
