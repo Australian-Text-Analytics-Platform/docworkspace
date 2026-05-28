@@ -435,6 +435,11 @@ class Node:
             "columns": list(schema.names()),
             "can_undo": self.can_undo,
             "can_redo": self.can_redo,
+            "tokenizer_models": {
+                source_col: str(meta["model"])
+                for source_col, meta in self.tokenization.items()
+                if meta.get("model")
+            },
         }
 
     def to_dict(self, *, base_dir: str | Path | None = None) -> dict[str, Any]:
