@@ -240,8 +240,8 @@ def test_node_tokenization_metadata_round_trip(tmp_path: Path):
     workspace = Workspace("node_io_tokenization")
     workspace.ws_root_dir = tmp_path
     meta: TokenizationMeta = {
-        "column_name": "tokenization.text.jieba",
-        "model": "jieba",
+        "column_name": "tokenization.text.lindera:jieba",
+        "model": "lindera:jieba",
         "language": "zh",
         "params": {"lowercase": False, "remove_punct": True},
     }
@@ -263,9 +263,9 @@ def test_node_tokenization_metadata_round_trip(tmp_path: Path):
     workspace2.ws_root_dir = tmp_path
     restored = from_dict(payload, workspace=workspace2)
     assert restored.tokenization == {"text": meta}
-    assert restored.find_tokenization_column("text") == "tokenization.text.jieba"
+    assert restored.find_tokenization_column("text") == "tokenization.text.lindera:jieba"
     assert (
-        restored.find_tokenization_column("text", model="jieba")
-        == "tokenization.text.jieba"
+        restored.find_tokenization_column("text", model="lindera:jieba")
+        == "tokenization.text.lindera:jieba"
     )
     assert restored.find_tokenization_column("text", model="other-model") is None

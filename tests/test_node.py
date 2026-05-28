@@ -251,8 +251,8 @@ class TestNode:
     def test_node_select_preserves_tokenization_metadata_by_source_column(self):
         """Selecting a tokenized source column keeps its tokenization spec."""
         meta: TokenizationMeta = {
-            "column_name": "tokenization.text.jieba",
-            "model": "jieba",
+            "column_name": "tokenization.text.lindera:jieba",
+            "model": "lindera:jieba",
             "language": "zh",
             "params": {"lowercase": False, "remove_punct": True},
         }
@@ -265,20 +265,20 @@ class TestNode:
         selected = node.select("text")
 
         assert selected.tokenization == {"text": meta}
-        assert selected.find_tokenization_column("text") == "tokenization.text.jieba"
-        assert "tokenization.text.jieba" not in selected.data.collect_schema().names()
+        assert selected.find_tokenization_column("text") == "tokenization.text.lindera:jieba"
+        assert "tokenization.text.lindera:jieba" not in selected.data.collect_schema().names()
 
     def test_node_select_drops_tokenization_metadata_without_source_column(self):
         """Selecting away a source column invalidates only that tokenization spec."""
         text_meta: TokenizationMeta = {
-            "column_name": "tokenization.text.jieba",
-            "model": "jieba",
+            "column_name": "tokenization.text.lindera:jieba",
+            "model": "lindera:jieba",
             "language": "zh",
             "params": {"lowercase": True, "remove_punct": True},
         }
         other_meta: TokenizationMeta = {
-            "column_name": "tokenization.other.bert-base-uncased",
-            "model": "bert-base-uncased",
+            "column_name": "tokenization.other.huggingface:bert-base-uncased",
+            "model": "huggingface:bert-base-uncased",
             "language": "en",
             "params": {"lowercase": True, "remove_punct": True},
         }
@@ -295,8 +295,8 @@ class TestNode:
     def test_node_drop_cascades_tokenization_columns(self):
         """Dropping a tokenized source removes metadata and hydrated column if present."""
         meta: TokenizationMeta = {
-            "column_name": "tokenization.text.jieba",
-            "model": "jieba",
+            "column_name": "tokenization.text.lindera:jieba",
+            "model": "lindera:jieba",
             "language": "zh",
             "params": {"lowercase": True, "remove_punct": True},
         }
@@ -305,7 +305,7 @@ class TestNode:
                 {
                     "text": ["左"],
                     "other": [1],
-                    "tokenization.text.jieba": [
+                    "tokenization.text.lindera:jieba": [
                         [{"token": "左", "start": 0, "end": 1}]
                     ],
                 }
@@ -319,13 +319,13 @@ class TestNode:
 
         cascaded = node.drop("text")
         assert cascaded.tokenization == {}
-        assert "tokenization.text.jieba" not in cascaded.data.collect_schema().names()
+        assert "tokenization.text.lindera:jieba" not in cascaded.data.collect_schema().names()
 
     def test_node_rename_cascades_tokenization_columns(self):
         """Renaming a tokenized source removes stale tokenization metadata."""
         meta: TokenizationMeta = {
-            "column_name": "tokenization.text.jieba",
-            "model": "jieba",
+            "column_name": "tokenization.text.lindera:jieba",
+            "model": "lindera:jieba",
             "language": "zh",
             "params": {"lowercase": True, "remove_punct": True},
         }
@@ -333,7 +333,7 @@ class TestNode:
             pl.DataFrame(
                 {
                     "text": ["左"],
-                    "tokenization.text.jieba": [
+                    "tokenization.text.lindera:jieba": [
                         [{"token": "左", "start": 0, "end": 1}]
                     ],
                 }
@@ -347,19 +347,19 @@ class TestNode:
         after_names = node.data.collect_schema().names()
         assert node.tokenization == {}
         assert "body" in after_names
-        assert "tokenization.text.jieba" not in after_names
+        assert "tokenization.text.lindera:jieba" not in after_names
 
     def test_node_join_rejects_conflicting_tokenization_metadata(self):
         """Joining nodes must not silently overwrite tokenization specs."""
         left_meta: TokenizationMeta = {
-            "column_name": "tokenization.text.jieba",
-            "model": "jieba",
+            "column_name": "tokenization.text.lindera:jieba",
+            "model": "lindera:jieba",
             "language": "zh",
             "params": {"lowercase": True, "remove_punct": True},
         }
         right_meta: TokenizationMeta = {
-            "column_name": "tokenization.text.bert-base-uncased",
-            "model": "bert-base-uncased",
+            "column_name": "tokenization.text.huggingface:bert-base-uncased",
+            "model": "huggingface:bert-base-uncased",
             "language": "en",
             "params": {"lowercase": True, "remove_punct": True},
         }
@@ -380,14 +380,14 @@ class TestNode:
     def test_node_join_merges_distinct_tokenization_metadata(self):
         """Joining distinct tokenized source columns preserves both specs."""
         text_meta: TokenizationMeta = {
-            "column_name": "tokenization.text.jieba",
-            "model": "jieba",
+            "column_name": "tokenization.text.lindera:jieba",
+            "model": "lindera:jieba",
             "language": "zh",
             "params": {"lowercase": True, "remove_punct": True},
         }
         other_meta: TokenizationMeta = {
-            "column_name": "tokenization.other.bert-base-uncased",
-            "model": "bert-base-uncased",
+            "column_name": "tokenization.other.huggingface:bert-base-uncased",
+            "model": "huggingface:bert-base-uncased",
             "language": "en",
             "params": {"lowercase": True, "remove_punct": True},
         }

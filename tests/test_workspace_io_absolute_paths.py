@@ -181,10 +181,10 @@ def test_rebase_preserves_tokenized_node_after_move(tmp_path: Path):
     # Synthesize a hydrated tokens column on top via with_columns. The metadata
     # is cache-like and tokenization-specific, but the LazyFrame plan remains
     # schema-agnostic for source path rebasing.
-    tokens_name = "tokenization.text.jieba"
+    tokens_name = "tokenization.text.lindera:jieba"
     tokenization_meta: TokenizationMeta = {
         "column_name": tokens_name,
-        "model": "jieba",
+        "model": "lindera:jieba",
         "language": "zh",
         "params": {"lowercase": True, "remove_punct": True},
     }

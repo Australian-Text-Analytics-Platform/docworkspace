@@ -46,7 +46,7 @@ capped by `MAX_UNDO_DEPTH`.
 
 Tokenization metadata is tracked in `Node.tokenization`, keyed by source column.
 Each entry records the hydrated would-be column name such as
-`tokenization.text.jieba`, the tokenizer model, language, and cache metadata.
+`tokenization.text.lindera:jieba`, the tokenizer model, language, and cache metadata.
 Token columns are cache-backed by Wordflow and may be absent from the stored
 LazyFrame until an analysis hydrates them.
 
