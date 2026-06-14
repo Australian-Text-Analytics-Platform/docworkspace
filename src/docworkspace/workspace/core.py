@@ -132,6 +132,70 @@ class Workspace:
         move_children_recursive(node)
         return node
 
+    def reorder_nodes(self, ordered_ids: list[str]) -> list[str]:
+        """Rebuild ``self.nodes`` so iteration follows ``ordered_ids``.
+
+        Used by:
+        - Backend ``reorder_workspace_nodes`` route because the list view drag
+          gesture commits a new persisted node order, and ``write_workspace``
+          serializes ``self.nodes`` in iteration order.
+        Why:
+        - ``self.nodes`` is an insertion-ordered dict that doubles as the
+          durable node list; reordering means rebuilding it in the requested
+          sequence rather than tracking a separate order field.
+        Flow:
+        1. Emit every id from ``ordered_ids`` that maps to a live node, skipping
+           duplicates and unknown ids so a stale client payload cannot drop or
+           clone nodes.
+        2. Append any node missing from the payload in its current relative
+           order so the operation can never lose nodes.
+        3. Swap in the rebuilt dict and return the resulting id order.
+        """
+        new_nodes: dict[str, Node] = {}
+        for nid in ordered_ids:
+            node = self.nodes.get(nid)
+            if node is not None and nid not in new_nodes:
+                new_nodes[nid] = node
+        for nid, node in self.nodes.items():
+            if nid not in new_nodes:
+                new_nodes[nid] = node
+        self.nodes = new_nodes
+        return list(self.nodes.keys())
+
+    def place_node_after_parent(self, node: Node | str) -> None:
+        """Move ``node`` to sit immediately below its first in-workspace parent.
+
+        Used by:
+        - Backend node-creation helpers (``_create_and_persist_child_node``,
+          clone, detach, and analysis result writers) because a freshly derived
+          node should appear right under its mother node in the list view
+          instead of being appended to the end.
+        Why:
+        - ``add_node`` deliberately appends so that loading a saved workspace
+          preserves the persisted order; smart insertion is therefore an
+          explicit post-creation step rather than ``add_node`` behavior.
+        Flow:
+        1. Resolve the node and bail out when it is unknown to this workspace.
+        2. Find the first parent that also lives in this workspace (root/import
+           nodes have none, so they keep their appended position).
+        3. Reinsert the node directly after that parent via ``reorder_nodes``.
+        """
+        node_obj = self.nodes.get(node) if isinstance(node, str) else node
+        if node_obj is None or node_obj.id not in self.nodes:
+            return
+        parent_id: str | None = None
+        for parent in node_obj.parents:
+            pid = parent.id if isinstance(parent, Node) else str(parent)
+            if pid in self.nodes and pid != node_obj.id:
+                parent_id = pid
+                break
+        if parent_id is None:
+            return
+        order = [nid for nid in self.nodes if nid != node_obj.id]
+        idx = order.index(parent_id)
+        order.insert(idx + 1, node_obj.id)
+        self.reorder_nodes(order)
+
     def remove_node(self, node_id: str) -> bool:
         if node_id not in self.nodes:
             return False
