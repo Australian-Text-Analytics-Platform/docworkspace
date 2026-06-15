@@ -240,9 +240,6 @@ class Workspace:
                 return node
         return None
 
-    def get_node_by_uuid(self, uuid: str) -> Node | None:  # Backward compat
-        return self.nodes.get(uuid)
-
     def list_nodes(self) -> list[Node]:
         return list(self.nodes.values())
 
