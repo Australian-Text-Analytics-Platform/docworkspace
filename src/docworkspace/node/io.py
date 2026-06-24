@@ -47,6 +47,7 @@ def to_dict(node: Node, *, base_dir: str | Path | None = None) -> dict[str, Any]
             "name": node.name,
             "operation": node.operation,
             "document": node.document,
+            "color": node.color,
             "tokenization": {
                 source: dict(meta) for source, meta in node.tokenization.items()
             },

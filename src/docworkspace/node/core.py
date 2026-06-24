@@ -50,6 +50,7 @@ class Node:
         operation: str | None = None,
         id: str | None = None,
         document: str | None = None,
+        color: str | None = None,
         tokenization: Mapping[str, TokenizationMeta] | None = None,
     ) -> None:
         self.id = id or str(uuid.uuid4())
@@ -64,6 +65,7 @@ class Node:
         self._redo_stack: list[pl.LazyFrame] = []
         self._data: pl.LazyFrame = data
         self._document_column: str | None = document
+        self.color: str | None = color
         self.tokenization = cast(
             dict[str, TokenizationMeta],
             {k: dict(v) for k, v in tokenization.items()} if tokenization else {},
@@ -430,6 +432,7 @@ class Node:
             "parent_ids": [self._parent_id(parent) for parent in self.parents],
             "child_ids": [c.id for c in self.children],
             "document": self.document,
+            "color": self.color,
             "shape": (height, self.data.collect_schema().len()),
             "schema": {col: str(dtype) for col, dtype in schema.items()},
             "columns": list(schema.names()),

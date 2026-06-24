@@ -30,6 +30,7 @@ def test_node_to_dict_persists_lazyframe_payload(tmp_path: Path):
             "name": "root",
             "operation": "source",
             "document": "text",
+            "color": None,
             "tokenization": {},
             "parents": [],
         },
@@ -269,3 +270,25 @@ def test_node_tokenization_metadata_round_trip(tmp_path: Path):
         == "tokenization.text.lindera:jieba"
     )
     assert restored.find_tokenization_column("text", model="other-model") is None
+
+
+def test_node_color_metadata_round_trip(tmp_path: Path):
+    """Node.color survives to_dict / from_dict as node-level display metadata."""
+    workspace = Workspace("node_io_color")
+    workspace.ws_root_dir = tmp_path
+    node = workspace.add_node(
+        Node(
+            data=pl.DataFrame({"text": ["a"]}).lazy(),
+            name="colourful",
+            workspace=workspace,
+            color="#2563eb",
+        )
+    )
+
+    payload = to_dict(node, base_dir=tmp_path)
+    assert payload["node_metadata"]["color"] == "#2563eb"
+
+    workspace2 = Workspace("node_io_color_loaded")
+    workspace2.ws_root_dir = tmp_path
+    restored = from_dict(payload, workspace=workspace2)
+    assert restored.color == "#2563eb"
