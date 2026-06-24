@@ -1,12 +1,12 @@
 [project]
 name = "docworkspace"
-version = "0.2.8"
+version = "0.3.0"
 description = "A workspace library for managing Polars dataframes with parent-child relationships and lazy evaluation"
 readme = "README.md"
 requires-python = ">=3.14"
 # polars-text registers the `.text` namespace used by workspace LazyFrames.
 # polars-source-utils owns serialized plan path inspection/rebasing.
-dependencies = ["polars-text>=0.1.6", "polars-source-utils>=0.1.0"]
+dependencies = ["polars-text>=0.4.0", "polars-source-utils>=0.2.0"]
 
 [build-system]
 requires = ["hatchling"]
