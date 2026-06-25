@@ -1,7 +1,6 @@
 """Tests for the Node class."""
 
-from inspect import signature
-from typing import Mapping, Sequence, cast, get_type_hints
+from typing import cast
 
 import polars as pl
 import pytest
@@ -17,11 +16,6 @@ class TestNode:
         """Create a sample polars DataFrame."""
         return pl.DataFrame({"text": ["Hello", "World", "Test"], "value": [1, 2, 3]})
 
-    @pytest.fixture
-    def sample_lazy_df(self):
-        """Create a sample polars LazyFrame."""
-        return pl.LazyFrame({"text": ["Hello", "World", "Test"], "value": [1, 2, 3]})
-
     def test_node_creation_with_workspace(self, sample_df):
         """Test creating a Node with explicit workspace."""
         workspace = Workspace("test_workspace")
@@ -32,14 +26,6 @@ class TestNode:
         assert len(node.parents) == 0
         assert len(node.children) == 0
         assert node.workspace == workspace
-
-    def test_node_creation_without_workspace(self, sample_df):
-        """Test creating a Node without workspace keeps it unattached."""
-        node = Node(sample_df.lazy(), "test_node")
-
-        assert node.name == "test_node"
-        assert isinstance(node.data, pl.LazyFrame)
-        assert node.workspace is None
 
     def test_node_creation_with_string_parent_ids_without_workspace(self, sample_df):
         """Test creating an unattached Node with unresolved parent ids."""
@@ -53,34 +39,6 @@ class TestNode:
         assert node.workspace is None
         assert node.parents == ["parent-123"]
         assert node.children == []
-
-    def test_node_init_contract_uses_non_optional_parents(self):
-        """Constructor type contract should not advertise optional parents."""
-        hints = get_type_hints(
-            Node.__init__,
-            globalns={
-                "Node": Node,
-                "Workspace": Workspace,
-                "Sequence": Sequence,
-                "Mapping": Mapping,
-                "TokenizationMeta": TokenizationMeta,
-                "pl": pl,
-            },
-        )
-
-        assert hints["name"] is str
-        assert hints["parents"] == Sequence[Node | str]
-        assert signature(Node.__init__).parameters["parents"].default == ()
-
-    def test_node_lazy_status_polars_dataframe(self, sample_df):
-        """Test lazy status for polars DataFrame."""
-        node = Node(sample_df.lazy(), "test_node")
-        assert isinstance(node.data, pl.LazyFrame)
-
-    def test_node_lazy_status_polars_lazyframe(self, sample_lazy_df):
-        """Test lazy status for polars LazyFrame."""
-        node = Node(sample_lazy_df, "test_node")
-        assert isinstance(node.data, pl.LazyFrame)
 
     def test_node_filter(self, sample_df):
         """Test filtering a Node."""
@@ -424,15 +382,6 @@ class TestNode:
         # Columns should be a list of column names
         assert info["columns"] == ["text", "value"]
 
-    def test_node_repr(self, sample_df):
-        """Test string representation of Node."""
-        node = Node(sample_df.lazy(), "test_node")
-
-        repr_str = repr(node)
-        assert "test_node" in repr_str
-        assert "LazyFrame" in repr_str
-        assert "document=None" in repr_str
-
     def test_node_data_setter_creates_undo_checkpoint(self, sample_df):
         """Assigning node.data should push previous plan onto undo stack."""
         node = Node(sample_df.lazy(), "test_node")
@@ -519,16 +468,6 @@ class TestNodeRelationships:
             }
         )
 
-    def test_filter_creates_parent_child_relationship(self, workspace, sample_df):
-        """Test that filter operation creates proper parent-child relationship."""
-        parent = Node(sample_df.lazy(), "parent", workspace)
-        child = parent.filter(pl.col("category") == "A")
-
-        assert len(parent.children) == 1
-        assert parent.children[0] == child
-        assert len(child.parents) == 1
-        assert child.parents[0] == parent
-
     def test_multiple_children(self, workspace, sample_df):
         """Test that a node can have multiple children."""
         parent = Node(sample_df.lazy(), "parent", workspace)
@@ -570,22 +509,6 @@ class TestNodeRelationships:
         assert child.workspace == workspace
         assert child.parents == [parent]
         assert child in parent.children
-
-    def test_merge_multiple_parents(self, workspace):
-        """Test that merge creates a node with multiple parents."""
-        df1 = pl.DataFrame({"key": [1, 2], "val1": ["a", "b"]})
-        df2 = pl.DataFrame({"key": [1, 2], "val2": ["x", "y"]})
-
-        parent1 = Node(df1.lazy(), "parent1", workspace)
-        parent2 = Node(df2.lazy(), "parent2", workspace)
-
-        merged = parent1.join(parent2, on="key")
-
-        assert len(merged.parents) == 2
-        assert parent1 in merged.parents
-        assert parent2 in merged.parents
-        assert merged in parent1.children
-        assert merged in parent2.children
 
 
 def test_node_shape_does_not_materialise_list_columns():

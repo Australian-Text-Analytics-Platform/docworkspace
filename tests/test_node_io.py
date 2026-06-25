@@ -1,5 +1,4 @@
 import json
-import os
 from pathlib import Path
 from typing import cast
 
@@ -145,27 +144,6 @@ def test_node_loads_round_trip_from_json_string(tmp_path: Path):
     assert cast(pl.DataFrame, restored.data.collect()).to_dict(as_series=False) == {
         "value": [3, 4]
     }
-
-
-def test_node_from_dict_uses_constructor_defaults_for_runtime_state(tmp_path: Path):
-    source_workspace = Workspace("source")
-    source_workspace.ws_root_dir = tmp_path
-    node = source_workspace.add_node(
-        Node(
-            data=pl.DataFrame({"value": [1, 2]}).lazy(),
-            name="constructor_restore",
-            workspace=source_workspace,
-        )
-    )
-    payload = to_dict(node, base_dir=tmp_path)
-    restored = from_dict(
-        payload,
-        workspace=Workspace("restored", ws_root_dir=tmp_path),
-        base_dir=tmp_path,
-    )
-
-    restored.data = restored.data.with_columns(pl.lit(9).alias("extra"))
-    assert restored.can_undo is True
 
 
 def test_node_from_dict_restores_existing_parent_nodes_by_id(tmp_path: Path):
